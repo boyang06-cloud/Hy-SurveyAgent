@@ -15,7 +15,7 @@
 api_key = YOUR_HY3_API_KEY
 
 # Hy3 服务地址（按官方提供的实际地址替换）
-base_url = https://api.hy3.example.com/v1
+base_url = Https://tokenhub.tencentmaas.com/v1
 
 # 可选项，如控制台要求一并配置
 # app_id =
