@@ -1,0 +1,11 @@
+topic: "Vision-Language Models for Autonomous Driving"
+
+research_questions:
+  - "How have VLMs been applied to autonomous driving?"
+  - "What are the main methodological categories?"
+
+time_range:
+  start: 2020
+  end: 2026
+
+output_style: "academic_survey"

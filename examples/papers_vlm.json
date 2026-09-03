@@ -1,0 +1,26 @@
+[
+  {
+    "paper_id": "P001",
+    "title": "DriveVLM: The Convergence of Vision-Language Models and Autonomous Driving",
+    "authors": ["Example Author A", "Example Author B"],
+    "year": 2024,
+    "source": "Example Conference on Computer Vision 2024",
+    "abstract": "This synthetic example paper studies how vision-language models are adapted to autonomous driving. It proposes a scene description module, a language-grounded planning head, and reports qualitative results on a synthetic driving benchmark. The abstract is placeholder text used only for local smoke testing of Hy-SurveyAgent."
+  },
+  {
+    "paper_id": "P002",
+    "title": "Language-Grounded Trajectory Prediction with Multimodal Transformers",
+    "authors": ["Example Author C"],
+    "year": 2025,
+    "source": "Example Journal of Robotics 2025",
+    "abstract": "This synthetic example paper formulates trajectory prediction as a language-conditioned sequence modelling problem. A multimodal transformer fuses camera tokens with textual route instructions, and the authors compare against a camera-only baseline on a synthetic dataset."
+  },
+  {
+    "paper_id": "P003",
+    "title": "A Taxonomy of Vision-Language Perception for End-to-End Driving",
+    "authors": ["Example Author D", "Example Author E", "Example Author F"],
+    "year": 2025,
+    "source": "Example Workshop on Autonomous Systems 2025",
+    "abstract": "This synthetic example paper surveys design choices for vision-language perception stacks in end-to-end driving, organising prior work into prompt-based, embedding-based, and agent-based categories, and discusses evaluation protocols and open problems."
+  }
+]
