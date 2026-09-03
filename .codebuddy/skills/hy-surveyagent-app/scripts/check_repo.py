@@ -58,11 +58,27 @@ SKIP_DIRS = {
 
 # sk-xxx 形式，或被引号包裹的较长 api_key 字面量
 KEY_PATTERN = re.compile(
-    r"(sk-[A-Za-z0-9_\-]{16,}|api[_-]?key\s*[:=]\s*[\"'][^\"'\s]{12,}[\"'])",
+    r"(sk-[A-Za-z0-9_\-]{16,}|api[_-]?key\s*[:=]\s*[\"']([^\"'\s]{12,})[\"'])",
+    re.IGNORECASE,
+)
+# 明显的占位值 / 测试假值，不算硬编码密钥（单元测试与冒烟脚本使用固定假值是允许的）
+DUMMY_PATTERN = re.compile(
+    r"^(sk[-_](unit|test|smoke|fake|dummy|example|local|demo|xxx)"
+    r"|your_|changeme|placeholder|\$\{|x{8,})",
     re.IGNORECASE,
 )
 # 疑似直接引用厂商 SDK（Hy3 / OpenAI / Anthropic）
 SDK_PATTERN = re.compile(r"^\s*(?:from|import)\s+(hy3[a-z0-9_]*|openai|anthropic)\b", re.IGNORECASE | re.MULTILINE)
+
+
+def scan_keys(text: str) -> bool:
+    """返回是否包含疑似真实密钥。只返回布尔值，不回显密钥原文。"""
+    for match in KEY_PATTERN.finditer(text):
+        candidate = match.group(2) or match.group(1)
+        if DUMMY_PATTERN.search(candidate):
+            continue
+        return True
+    return False
 
 
 class Report:
@@ -149,7 +165,7 @@ def check_secrets(root: Path, report: Report) -> None:
             text = path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        if KEY_PATTERN.search(text):
+        if scan_keys(text):
             hits.append(str(path.relative_to(root)))
     if hits:
         report.add("FAIL", "疑似硬编码密钥，改从 API_key.conf 读取: " + ", ".join(hits[:5]))
