@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---- Hy-SurveyAgent ----
+# 密钥与本地配置：仓库只提交 .example 模板
+API_key.conf
+configs/config.yaml
+
+# 运行产物与实验结果
+runs/
+results/
+experiments/outputs/
