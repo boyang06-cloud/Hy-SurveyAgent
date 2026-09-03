@@ -1,0 +1,36 @@
+# Hy-SurveyAgent 运行配置模板（非敏感）
+#
+# 使用方式：
+#   cp configs/config.example.yaml configs/config.yaml
+#
+# 说明：
+#   本文件只包含运行参数，禁止写入任何 API Key / 密钥。
+#   密钥统一放在项目根目录的 API_key.conf（由 API_key.conf.example 复制而来）。
+#   运行时参数会被记录到 runs/<task_id>/meta.json，用于结果复现。
+
+model:
+  name: hy3-default          # 模型标识，具体可选值以 Hy3 官方控制台为准
+  temperature: 0.2           # Survey 生成偏好稳定输出，建议 ≤ 0.3
+  max_tokens: 8192
+  top_p: 1.0
+
+runtime:
+  max_concurrency: 8         # Paper Reader 并行上限
+  timeout_seconds: 60
+  max_retries: 3
+  retry_backoff: 2.0
+
+paths:
+  runs_dir: runs
+  results_dir: results
+  benchmark_dir: benchmark
+  prompts_dir: app/prompts
+
+pipeline:
+  benchmark_mode: true       # true = 使用固定 Source Paper Set，禁止联网检索
+  enable_citation_verification: true
+  fail_fast: false           # 单篇论文失败不中断整体流程
+
+logging:
+  level: INFO
+  stage_log: logs/stages.jsonl

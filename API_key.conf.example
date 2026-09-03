@@ -1,0 +1,26 @@
+# Hy-SurveyAgent API 配置模板
+#
+# 使用方式（每个开发者 / 每台机器执行一次）：
+#   cp API_key.conf.example API_key.conf
+#   编辑 API_key.conf，把占位符替换为真实值
+#
+# 注意：
+#   1. API_key.conf 已被 .gitignore 忽略，禁止提交到 Git 仓库。
+#   2. 本文件只保存密钥与端点等敏感信息，非敏感运行参数请写在 configs/config.yaml。
+#   3. 代码只通过 app/config.py（configparser）读取本文件，禁止任何位置硬编码 Key。
+#   4. CI 环境可用同名环境变量覆盖，例如 HY3_API_KEY。
+
+[hy3]
+# Hy3 API Key，从控制台获取后替换下方占位符
+api_key = YOUR_HY3_API_KEY
+
+# Hy3 服务地址（按官方提供的实际地址替换）
+base_url = https://api.hy3.example.com/v1
+
+# 可选项，如控制台要求一并配置
+# app_id =
+# app_secret =
+
+[runtime]
+# 请求超时（秒），可被 configs/config.yaml 覆盖
+timeout = 300
