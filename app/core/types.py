@@ -25,6 +25,12 @@ def _as_list(value: Any) -> list[str]:
     return [_as_str(value)]
 
 
+def _obj_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
 def _as_year(value: Any) -> int | None:
     if value is None or value == "":
         return None
@@ -73,6 +79,7 @@ class PaperSet:
 
     papers: list[Paper] = field(default_factory=list)
     duplicates_removed: int = 0
+    filtered_out: int = 0
 
     def __len__(self) -> int:
         return len(self.papers)
@@ -88,6 +95,105 @@ class PaperSet:
             if paper.paper_id == paper_id:
                 return paper
         return None
+
+
+@dataclass
+class PaperClaim:
+    """论文内部抽取的一条论断，ID 形如 `P001-C1`。
+
+    `evidence` 保留论文中的原始依据，供 Step 4 的 Citation Verifier 比对。
+    """
+
+    claim_id: str = ""
+    text: str = ""
+    evidence: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class PaperAnalysis:
+    """Paper Reader 输出：单篇论文的统一结构化表示（Step 2）。
+
+    字段与取值见 data-contracts 第 4 节。抽取内容必须来自论文正文，
+    缺失时留空，禁止由模型补全。
+    """
+
+    STATUS_OK = "ok"
+    STATUS_UNAVAILABLE = "unavailable"
+
+    paper_id: str = ""
+    problem: str = ""
+    motivation: str = ""
+    method: str = ""
+    architecture: str = ""
+    dataset: list[str] = field(default_factory=list)
+    experiments: list[str] = field(default_factory=list)
+    results: list[str] = field(default_factory=list)
+    key_idea: str = ""
+    advantages: list[str] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
+    claims: list[PaperClaim] = field(default_factory=list)
+    status: str = STATUS_OK
+    error: str = ""
+
+    @property
+    def available(self) -> bool:
+        return self.status == self.STATUS_OK
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "paper_id": self.paper_id,
+            "problem": self.problem,
+            "motivation": self.motivation,
+            "method": self.method,
+            "architecture": self.architecture,
+            "dataset": list(self.dataset),
+            "experiments": list(self.experiments),
+            "results": list(self.results),
+            "key_idea": self.key_idea,
+            "advantages": list(self.advantages),
+            "limitations": list(self.limitations),
+            "claims": [claim.to_dict() for claim in self.claims],
+            "status": self.status,
+            "error": self.error,
+        }
+
+    @classmethod
+    def unavailable(cls, paper_id: str, error: str = "") -> PaperAnalysis:
+        """构造读取失败的分析结果：单篇失败不得中断整体流程。"""
+        return cls(paper_id=paper_id, status=cls.STATUS_UNAVAILABLE, error=error)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], paper_id: str = "") -> PaperAnalysis:
+        resolved = _as_str(data.get("paper_id") or paper_id)
+        claims: list[PaperClaim] = []
+        for item in _obj_list(data.get("claims")):
+            text = _as_str(item.get("text"))
+            if not text:
+                continue
+            claims.append(
+                PaperClaim(
+                    claim_id=f"{resolved}-C{len(claims) + 1}",
+                    text=text,
+                    evidence=_as_str(item.get("evidence")),
+                )
+            )
+        return cls(
+            paper_id=resolved,
+            problem=_as_str(data.get("problem")),
+            motivation=_as_str(data.get("motivation")),
+            method=_as_str(data.get("method")),
+            architecture=_as_str(data.get("architecture")),
+            dataset=_as_list(data.get("dataset")),
+            experiments=_as_list(data.get("experiments")),
+            results=_as_list(data.get("results")),
+            key_idea=_as_str(data.get("key_idea")),
+            advantages=_as_list(data.get("advantages")),
+            limitations=_as_list(data.get("limitations")),
+            claims=claims,
+        )
 
 
 @dataclass
@@ -154,7 +260,7 @@ class SurveyState:
     task: TaskInput | None = None
     task_spec: dict[str, Any] = field(default_factory=dict)  # Step 2: TaskSpec
     papers: list[Paper] = field(default_factory=list)
-    paper_analyses: list[dict[str, Any]] = field(default_factory=list)  # Step 2: PaperReader
+    paper_analyses: list[PaperAnalysis] = field(default_factory=list)  # Step 2: PaperReader
     knowledge_base: dict[str, Any] = field(default_factory=dict)  # Step 3: Organizer
     outline: dict[str, Any] = field(default_factory=dict)  # Step 3: Planner
     draft: str = ""
