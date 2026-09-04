@@ -14,8 +14,6 @@ import yaml
 
 from app.core.types import Paper, PaperSet, TaskInput
 
-MAX_PAPER_CHARS_DEFAULT = 6000
-
 
 class LoaderError(ValueError):
     """输入文件格式或内容不合法。"""
@@ -150,36 +148,4 @@ def _as_list(value: Any) -> list[Any]:
     return list(value) if isinstance(value, (list, tuple)) else [value]
 
 
-def render_papers_context(
-    papers: PaperSet,
-    *,
-    max_papers: int | None = None,
-    max_chars_per_paper: int = MAX_PAPER_CHARS_DEFAULT,
-) -> str:
-    """把论文渲染成 Writer 可用的编号上下文，并做长度截断以控制 Context。"""
-    selected = list(papers.papers)
-    if max_papers is not None:
-        selected = selected[: max(0, max_papers)]
 
-    blocks = []
-    for paper in selected:
-        parts = [f"[{paper.paper_id}] {paper.label()}"]
-        if paper.authors:
-            parts.append(f"Authors: {', '.join(paper.authors[:10])}")
-        if paper.source:
-            parts.append(f"Source: {paper.source}")
-        if paper.abstract:
-            parts.append(f"Abstract: {_truncate(paper.abstract, max_chars_per_paper)}")
-        elif paper.content:
-            parts.append(f"Content: {_truncate(paper.content, max_chars_per_paper)}")
-        blocks.append("\n".join(parts))
-
-    if not blocks:
-        return "（无论文可用）"
-    return "\n\n".join(blocks)
-
-
-def _truncate(text: str, limit: int) -> str:
-    if limit <= 0 or len(text) <= limit:
-        return text
-    return text[:limit].rstrip() + " ...[truncated]"
