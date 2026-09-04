@@ -196,6 +196,193 @@ class PaperAnalysis:
         )
 
 
+VALID_RELATIONS = ("extends", "compares", "solves", "uses_dataset", "evaluates_on")
+
+
+@dataclass
+class PaperGroup:
+    """按主题 / 方法 / 问题 / 数据集聚合的论文分组。"""
+
+    name: str
+    papers: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "papers": list(self.papers)}
+
+
+@dataclass
+class PaperRelation:
+    """论文间关系（如 P001 extends P002）。"""
+
+    source: str
+    relation: str
+    target: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"source": self.source, "relation": self.relation, "target": self.target}
+
+
+@dataclass
+class KnowledgeBase:
+    """Knowledge Organizer 输出：跨论文的研究领域知识结构（Step 3）。
+
+    第一版用 Python 对象 / JSON 表示，不引入图数据库。
+    """
+
+    topics: list[str] = field(default_factory=list)
+    methods: list[PaperGroup] = field(default_factory=list)
+    problems: list[PaperGroup] = field(default_factory=list)
+    datasets: list[PaperGroup] = field(default_factory=list)
+    papers: list[str] = field(default_factory=list)
+    relations: list[PaperRelation] = field(default_factory=list)
+    dropped: int = 0
+
+    @property
+    def is_empty(self) -> bool:
+        """没有任何分组、关系或主题时视为空知识结构。"""
+        return not (self.topics or self.methods or self.problems or self.datasets or self.relations)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "topics": list(self.topics),
+            "methods": [group.to_dict() for group in self.methods],
+            "problems": [group.to_dict() for group in self.problems],
+            "datasets": [group.to_dict() for group in self.datasets],
+            "papers": list(self.papers),
+            "relations": [relation.to_dict() for relation in self.relations],
+            "dropped": self.dropped,
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        known_ids: set[str],
+        default_papers: list[str] | None = None,
+    ) -> KnowledgeBase:
+        """归一化：丢弃空名分组与指向未知论文的条目，同名分组只保留第一条。"""
+        dropped = 0
+        topics = [item for item in _as_list(data.get("topics")) if item]
+
+        def _groups(key: str) -> tuple[list[PaperGroup], int]:
+            groups: list[PaperGroup] = []
+            seen: set[str] = set()
+            count = 0
+            for item in _obj_list(data.get(key)):
+                name = _as_str(item.get("name"))
+                papers = [pid for pid in _as_list(item.get("papers")) if pid in known_ids]
+                if not name or not papers:
+                    count += 1
+                    continue
+                key_lower = name.lower()
+                if key_lower in seen:
+                    count += 1
+                    continue
+                seen.add(key_lower)
+                groups.append(PaperGroup(name=name, papers=papers))
+            return groups, count
+
+        methods, n = _groups("methods")
+        dropped += n
+        problems, n = _groups("problems")
+        dropped += n
+        datasets, n = _groups("datasets")
+        dropped += n
+
+        relations: list[PaperRelation] = []
+        for item in _obj_list(data.get("relations")):
+            source = _as_str(item.get("source"))
+            target = _as_str(item.get("target"))
+            relation = _as_str(item.get("relation")).lower()
+            if (
+                source == target
+                or source not in known_ids
+                or target not in known_ids
+                or relation not in VALID_RELATIONS
+            ):
+                dropped += 1
+                continue
+            relations.append(PaperRelation(source=source, relation=relation, target=target))
+
+        papers = [pid for pid in _as_list(data.get("papers")) if pid in known_ids]
+        return cls(
+            topics=topics,
+            methods=methods,
+            problems=problems,
+            datasets=datasets,
+            papers=papers or list(default_papers or []),
+            relations=relations,
+            dropped=dropped,
+        )
+
+
+@dataclass
+class OutlineSection:
+    """Survey 的一个章节规划：Purpose + Relevant Papers + Key Claims。"""
+
+    title: str
+    purpose: str = ""
+    papers: list[str] = field(default_factory=list)
+    key_claims: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "title": self.title,
+            "purpose": self.purpose,
+            "papers": list(self.papers),
+            "key_claims": list(self.key_claims),
+        }
+
+
+@dataclass
+class Outline:
+    """Outline Planner 输出（Step 3）。
+
+    每个 Section 必须同时具备 purpose 与 papers，否则视为非法并丢弃；
+    key_claims 只保留指向真实论文级 Claim 的引用。
+    """
+
+    sections: list[OutlineSection] = field(default_factory=list)
+    dropped: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sections": [section.to_dict() for section in self.sections],
+            "dropped": self.dropped,
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        known_ids: set[str],
+        known_claims: set[str] | None = None,
+    ) -> Outline:
+        allowed_claims = known_claims or set()
+        sections: list[OutlineSection] = []
+        seen_titles: set[str] = set()
+        dropped = 0
+        for item in _obj_list(data.get("sections")):
+            title = _as_str(item.get("title"))
+            purpose = _as_str(item.get("purpose"))
+            papers = [pid for pid in _as_list(item.get("papers")) if pid in known_ids]
+            if not title or not purpose or not papers:
+                dropped += 1
+                continue
+            key_lower = title.lower()
+            if key_lower in seen_titles:
+                dropped += 1
+                continue
+            seen_titles.add(key_lower)
+            key_claims = [
+                claim for claim in _as_list(item.get("key_claims")) if claim in allowed_claims
+            ]
+            sections.append(
+                OutlineSection(title=title, purpose=purpose, papers=papers, key_claims=key_claims)
+            )
+        return cls(sections=sections, dropped=dropped)
+
+
 @dataclass
 class TaskInput:
     """任务输入。Benchmark 模式下论文集合由 --papers 指定，不依赖实时检索。"""
@@ -261,8 +448,8 @@ class SurveyState:
     task_spec: dict[str, Any] = field(default_factory=dict)  # Step 2: TaskSpec
     papers: list[Paper] = field(default_factory=list)
     paper_analyses: list[PaperAnalysis] = field(default_factory=list)  # Step 2: PaperReader
-    knowledge_base: dict[str, Any] = field(default_factory=dict)  # Step 3: Organizer
-    outline: dict[str, Any] = field(default_factory=dict)  # Step 3: Planner
+    knowledge_base: KnowledgeBase = field(default_factory=KnowledgeBase)  # Step 3: Organizer
+    outline: Outline = field(default_factory=Outline)  # Step 3: Planner
     draft: str = ""
     claims: list[Claim] = field(default_factory=list)
     citation_map: list[Citation] = field(default_factory=list)
