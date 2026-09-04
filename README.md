@@ -3,8 +3,9 @@
 基于 **Hy3** 的学术 Survey 生成 Agent Application：输入一个研究主题与一组论文，自动完成
 「主题理解 → 文献组织 → 论文阅读 → Survey 规划 → Survey 生成 → 引用核验」，输出结构化、引用可追溯的 Survey。
 
-项目当前进度：**Step 2**（Hy3 Adapter + Literature Manager + Paper Reader + Simple Writer），
-已跑通 `Topic + Papers → Paper Analysis → Survey`。后续阶段见 `AGENTS.md` 第 14 节开发路线。
+项目当前进度：**Step 3**（Literature Manager + Paper Reader + Knowledge Organizer + Outline
+Planner + Outline-driven Writer），已跑通完整的多阶段 Agent Workflow。
+后续阶段见 `AGENTS.md` 第 14 节开发路线。
 
 ## Pipeline
 
@@ -17,11 +18,11 @@ Research Topic + Source Papers
         ↓
   Paper Reader（并行）      ← Step 2 已实现
         ↓
-  Knowledge Organizer      （Step 3）
+  Knowledge Organizer      ← Step 3 已实现
         ↓
-  Outline Planner          （Step 3）
+  Outline Planner          ← Step 3 已实现
         ↓
-  Survey Writer            ← Step 1/2 已实现（基于 Paper Analysis）
+  Survey Writer            ← Step 3 已实现（按 Outline 分节并行写作）
         ↓
   Citation Verifier        （Step 4）
         ↓
@@ -91,6 +92,9 @@ runs/<run_id>/
 ├── task.json          # 任务输入
 ├── papers.json        # 归一化后的 Source Papers
 ├── analyses.json      # 每篇论文的结构化分析（Paper Reader，失败论文标记 unavailable）
+├── knowledge.json     # 跨论文知识结构（Knowledge Organizer）
+├── outline.json       # Survey 章节规划（Outline Planner）
+├── prompts/           # dry-run 或各 Section 的渲染后 Prompt
 ├── claims.json        # Claim 列表与引用映射
 ├── verification.json  # Step 4 之前为空结构
 ├── draft.md / final.md

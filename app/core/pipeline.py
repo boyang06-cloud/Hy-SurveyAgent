@@ -1,10 +1,11 @@
-"""Survey Pipeline（Step 2）：`Topic + Source Papers → Paper Analysis → Survey`。
+"""Survey Pipeline（Step 3）：完整的多阶段 Agent Workflow。
 
 Stage 顺序：
-    literature_manager → paper_reader → survey_writer → finalize
+    literature_manager → paper_reader → knowledge_organizer
+    → outline_planner → survey_writer → finalize
 
-后续 Step 依次插入 knowledge_organizer / outline_planner / citation_verifier。
-约定：每个 Stage 只消费最小必要 Context，产物写入 SurveyState 并落盘到 runs/<task_id>/。
+约定：每个 Stage 只消费最小必要 Context，产物写入 SurveyState 并落盘到 runs/<task_id>/；
+关键 Stage（organizer / planner）无合法产物时整体中止，其余 Stage 单点失败可降级。
 """
 
 from __future__ import annotations
@@ -12,20 +13,31 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from app.agents.organizer import KnowledgeOrganizer
 from app.agents.paper_reader import PaperReader, ReaderConfig
-from app.agents.writer import SimpleSurveyWriter, WriterConfig, WriterResult
+from app.agents.planner import OutlinePlanner
+from app.agents.writer import SurveyWriter, WriterConfig, WriterResult
 from app.config import AppConfig
-from app.core.types import PaperSet, SurveyState, TaskInput, WriterOutput
+from app.core.types import (
+    Outline,
+    OutlineSection,
+    PaperAnalysis,
+    PaperSet,
+    SurveyState,
+    TaskInput,
+    WriterOutput,
+)
 from app.io.exporter import RunWriter
 from app.model.provider import LLMError, LLMProvider, LLMResponse
 from app.prompts.loader import PromptLoader
 
 STAGE_LITERATURE = "literature_manager"
 STAGE_READER = "paper_reader"
+STAGE_ORGANIZER = "knowledge_organizer"
+STAGE_PLANNER = "outline_planner"
 STAGE_WRITER = "survey_writer"
 STAGE_FINALIZE = "finalize"
-WRITER_PROMPT = "writer"
-READER_PROMPT = "paper_reader"
+PROMPTS = ("paper_reader", "organizer", "planner", "writer")
 
 
 class _DryRunProvider(LLMProvider):
@@ -67,33 +79,62 @@ async def run_pipeline(
         config.model,
         reader_config or ReaderConfig(max_concurrency=config.runtime.max_concurrency),
     )
-    writer = SimpleSurveyWriter(provider, prompts, config.model, writer_config)
+    organizer = KnowledgeOrganizer(provider, prompts, config.model)
+    planner = OutlinePlanner(provider, prompts, config.model)
+    writer = SurveyWriter(provider, prompts, config.model, writer_config)
 
     with run.stage(STAGE_LITERATURE, "task.json", "papers.json"):
         run.write_json("papers.json", [paper.to_dict() for paper in state.papers])
 
-    reader_usage_before = _usage_snapshot(provider)
+    reader_before = _usage_snapshot(provider)
     with run.stage(STAGE_READER, "papers.json", "analyses.json") as stats:
-        if dry_run:
-            if state.papers:
-                messages = reader.build_messages(state.papers[0])
-                run.write_text("prompts/paper_reader.rendered.md", str(messages[-1]["content"]))
-        else:
+        if dry_run and state.papers:
+            messages = reader.build_messages(state.papers[0])
+            run.write_text("prompts/paper_reader.rendered.md", str(messages[-1]["content"]))
+        elif not dry_run:
             state.paper_analyses = await reader.read_all(state.papers)
-        stats["token_usage"] = _usage_delta(provider, reader_usage_before)
+        stats["token_usage"] = _usage_delta(provider, reader_before)
         run.write_json("analyses.json", [item.to_dict() for item in state.paper_analyses])
 
-    writer_usage_before = _usage_snapshot(provider)
-    with run.stage(STAGE_WRITER, "analyses.json", "draft.md") as stats:
+    organizer_before = _usage_snapshot(provider)
+    with run.stage(STAGE_ORGANIZER, "analyses.json", "knowledge.json") as stats:
         if dry_run:
-            messages = writer.build_messages(task, state.paper_analyses, papers)
-            run.write_text("prompts/writer.rendered.md", str(messages[-1]["content"]))
-            result = WriterResult(output=WriterOutput(), messages=messages)
+            messages = organizer.build_messages(task, state.paper_analyses, papers)
+            run.write_text("prompts/organizer.rendered.md", str(messages[-1]["content"]))
         else:
-            result = await asyncio.to_thread(
-                writer.write, task, state.paper_analyses, papers
+            state.knowledge_base = await asyncio.to_thread(
+                organizer.organize, task, state.paper_analyses, papers
             )
-        stats["token_usage"] = _usage_delta(provider, writer_usage_before)
+        stats["token_usage"] = _usage_delta(provider, organizer_before)
+        run.write_json("knowledge.json", state.knowledge_base.to_dict())
+
+    planner_before = _usage_snapshot(provider)
+    with run.stage(STAGE_PLANNER, "knowledge.json", "outline.json") as stats:
+        if dry_run:
+            messages = planner.build_messages(
+                task, state.knowledge_base, state.paper_analyses, papers
+            )
+            run.write_text("prompts/planner.rendered.md", str(messages[-1]["content"]))
+            # dry-run 无模型产出，使用默认章节骨架以便渲染 Writer Prompt
+            state.outline = _default_outline(state.paper_analyses)
+        else:
+            state.outline = await asyncio.to_thread(
+                planner.plan, task, state.knowledge_base, state.paper_analyses, papers
+            )
+        stats["token_usage"] = _usage_delta(provider, planner_before)
+        run.write_json("outline.json", state.outline.to_dict())
+
+    writer_before = _usage_snapshot(provider)
+    with run.stage(STAGE_WRITER, "outline.json", "draft.md") as stats:
+        if dry_run:
+            render_writer_prompts(writer, task, state, papers, run)
+            result = WriterResult(output=WriterOutput())
+        else:
+            result = await writer.write(task, state.outline, state.paper_analyses, papers)
+            for index, messages in enumerate(result.section_messages, start=1):
+                body = str(messages[-1]["content"])
+                run.write_text(f"prompts/writer/{index:02d}.rendered.md", body)
+        stats["token_usage"] = _usage_delta(provider, writer_before)
         state.draft = result.output.survey_markdown
         state.claims = result.output.claims
         state.citation_map = result.output.citations
@@ -127,12 +168,48 @@ async def run_pipeline(
     return payload
 
 
+DEFAULT_SECTION_TITLES = (
+    "Introduction",
+    "Problem Definition",
+    "Taxonomy",
+    "Method Comparison",
+    "Future Directions",
+)
+
+
+def _default_outline(analyses: list[PaperAnalysis]) -> Outline:
+    """dry-run 专用：无模型产出时给出默认章节骨架，仅用于离线检查 Prompt。"""
+    available = [item.paper_id for item in analyses if item.available]
+    sections = [
+        OutlineSection(
+            title=title,
+            purpose=f"Dry-run placeholder: {title}.",
+            papers=list(available),
+        )
+        for title in DEFAULT_SECTION_TITLES
+    ]
+    return Outline(sections=sections)
+
+
+def render_writer_prompts(
+    writer: SurveyWriter,
+    task: TaskInput,
+    state: SurveyState,
+    papers: PaperSet,
+    run: RunWriter,
+) -> None:
+    """dry-run：渲染全部 Section 的 Prompt，便于离线检查。"""
+    for index, section in enumerate(state.outline.sections, start=1):
+        messages = writer.build_section_messages(task, section, state.paper_analyses, papers)
+        run.write_text(f"prompts/writer/{index:02d}.rendered.md", str(messages[-1]["content"]))
+
+
 def _usage_snapshot(provider: LLMProvider) -> dict[str, int]:
     return dict(provider.usage or {"prompt": 0, "completion": 0})
 
 
 def _usage_delta(provider: LLMProvider, before: dict[str, int]) -> dict[str, int]:
-    """计算某个 Stage 内的 token 增量（Reader/Writer 可能包含多次调用）。"""
+    """计算某个 Stage 内的 token 增量（Reader/Writer 包含多次调用）。"""
     after = _usage_snapshot(provider)
     return {key: after.get(key, 0) - before.get(key, 0) for key in ("prompt", "completion")}
 

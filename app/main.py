@@ -13,11 +13,13 @@ import sys
 from collections.abc import Sequence
 from typing import Any
 
+from app.agents.organizer import OrganizerError
 from app.agents.paper_reader import ReaderError
+from app.agents.planner import PlannerError
 from app.agents.writer import WriterError
 from app.config import ConfigError, load_config
 from app.core.meta import build_meta
-from app.core.pipeline import READER_PROMPT, WRITER_PROMPT, run_pipeline
+from app.core.pipeline import PROMPTS, run_pipeline
 from app.core.types import PaperSet, TaskInput
 from app.io.exporter import RunWriter
 from app.io.loader import LoaderError, load_task_input
@@ -38,9 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--task-file", help="任务文件（YAML / JSON），可带 research_questions 等字段"
     )
     parser.add_argument("--papers", required=True, help="论文集文件（JSON / JSONL / YAML）")
-    parser.add_argument(
-        "--config", help="运行配置路径，默认 configs/config.yaml"
-    )
+    parser.add_argument("--config", help="运行配置路径，默认 configs/config.yaml")
     parser.add_argument("--run-id", help="指定运行 ID，默认按日期自增")
     parser.add_argument("--limit", type=int, help="只取前 N 篇论文（调试用）")
     parser.add_argument("--dry-run", action="store_true", help="不调用模型，仅渲染并落盘 Prompt")
@@ -77,7 +77,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 task.topic,
                 extra={
                     "config": config.describe(),
-                    "prompts": prompts.describe([READER_PROMPT, WRITER_PROMPT]),
+                    "prompts": prompts.describe(list(PROMPTS)),
                     "input": {"papers": str(args.papers), "limit": args.limit},
                 },
             )
@@ -99,6 +99,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         ConfigError,
         LoaderError,
         ReaderError,
+        OrganizerError,
+        PlannerError,
         RetrieverError,
         WriterError,
         LLMError,
