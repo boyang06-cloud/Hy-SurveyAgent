@@ -8,7 +8,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from app.core.types import Paper, PaperAnalysis, PaperSet
+from app.core.types import (
+    KnowledgeBase,
+    OutlineSection,
+    Paper,
+    PaperAnalysis,
+    PaperSet,
+)
 
 MAX_READING_CHARS = 24000
 MAX_ANALYSIS_CHARS = 3000
@@ -74,6 +80,70 @@ def render_analyses_context(
             )
         blocks.append(_truncate("\n".join(lines), max_chars))
     return "\n\n".join(blocks)
+
+
+def render_knowledge_context(knowledge: KnowledgeBase) -> str:
+    """渲染知识结构供 Outline Planner 使用（不含论文全文）。"""
+    if knowledge.is_empty:
+        return "（知识结构为空）"
+    lines: list[str] = []
+    if knowledge.topics:
+        lines.append(f"Topics: {'; '.join(knowledge.topics)}")
+    for name, groups in (
+        ("Methods", knowledge.methods),
+        ("Problems", knowledge.problems),
+        ("Datasets", knowledge.datasets),
+    ):
+        if groups:
+            lines.append(f"{name}:")
+            lines.extend(f"- {group.name}: {', '.join(group.papers)}" for group in groups)
+    if knowledge.relations:
+        lines.append("Relations:")
+        lines.extend(
+            f"- {relation.source} {relation.relation} {relation.target}"
+            for relation in knowledge.relations
+        )
+    if knowledge.papers:
+        lines.append(f"Papers: {', '.join(knowledge.papers)}")
+    return "\n".join(lines)
+
+
+def render_claims_context(
+    analyses: list[PaperAnalysis],
+    papers: PaperSet,
+    *,
+    max_claims_per_paper: int = 5,
+    max_chars_per_evidence: int = 160,
+) -> str:
+    """渲染可引用的论文级 Claim（Planner 据此填充 key_claims）。"""
+    lines: list[str] = []
+    for analysis in analyses:
+        if not analysis.available or not analysis.claims:
+            continue
+        paper = papers.get(analysis.paper_id)
+        title = paper.label() if paper else analysis.paper_id
+        lines.append(f"[{analysis.paper_id}] {title}")
+        for claim in analysis.claims[:max_claims_per_paper]:
+            evidence = _truncate(claim.evidence, max_chars_per_evidence) if claim.evidence else ""
+            suffix = f" (evidence: {evidence})" if evidence else ""
+            lines.append(f"- {claim.claim_id}: {claim.text}{suffix}")
+    return "\n".join(lines) if lines else "（无论文级 Claim 可用）"
+
+
+def render_section_evidence(
+    section: OutlineSection,
+    analyses: list[PaperAnalysis],
+    papers: PaperSet,
+    *,
+    max_papers: int | None = None,
+    max_chars: int = MAX_ANALYSIS_CHARS,
+) -> str:
+    """渲染某个 Section 的最小必要证据：只包含该 Section 规划覆盖的论文。"""
+    wanted = set(section.papers)
+    relevant = [item for item in analyses if item.paper_id in wanted and item.available]
+    if not relevant:
+        relevant = [item for item in analyses if item.available]
+    return render_analyses_context(relevant, papers, max_papers=max_papers, max_chars=max_chars)
 
 
 def _append(lines: list[str], name: str, value: str) -> None:
