@@ -9,7 +9,15 @@ from typing import Any
 
 import pytest
 
-from app.core.types import Paper, PaperAnalysis, PaperSet
+from app.core.types import (
+    KnowledgeBase,
+    Outline,
+    OutlineSection,
+    Paper,
+    PaperAnalysis,
+    PaperGroup,
+    PaperSet,
+)
 from app.model.provider import LLMProvider, LLMResponse
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -108,6 +116,42 @@ def sample_analyses(sample_papers: PaperSet) -> list[PaperAnalysis]:
         )
         for paper in sample_papers
     ]
+
+
+@pytest.fixture
+def sample_knowledge(sample_papers: PaperSet) -> KnowledgeBase:
+    ids = [paper.paper_id for paper in sample_papers]
+    return KnowledgeBase(
+        topics=["Language-grounded driving"],
+        methods=[PaperGroup(name="Instruction-conditioned", papers=ids)],
+        problems=[PaperGroup(name="Open-loop evaluation", papers=ids)],
+        datasets=[PaperGroup(name="nuScenes", papers=ids[:1])],
+        papers=ids,
+        relations=[],
+    )
+
+
+@pytest.fixture
+def sample_outline(sample_papers: PaperSet, sample_analyses: list[PaperAnalysis]) -> Outline:
+    """两个 Section：Introduction 覆盖 P001，Taxonomy 覆盖其余论文。"""
+    claim_ids = [claim.claim_id for analysis in sample_analyses for claim in analysis.claims]
+    rest = [paper.paper_id for paper in sample_papers][1:]
+    return Outline(
+        sections=[
+            OutlineSection(
+                title="Introduction",
+                purpose="Motivate language-grounded driving",
+                papers=[sample_papers.papers[0].paper_id],
+                key_claims=claim_ids[:1],
+            ),
+            OutlineSection(
+                title="Taxonomy",
+                purpose="Classify existing methods",
+                papers=rest or [sample_papers.papers[0].paper_id],
+                key_claims=[],
+            ),
+        ]
+    )
 
 
 @pytest.fixture

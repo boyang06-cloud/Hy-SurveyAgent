@@ -127,9 +127,7 @@ def test_run_writer_logs_error_and_reraises(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError):
         with run.stage("boom", "in", "out"):
             raise RuntimeError("stage failed")
-    record = json.loads(
-        (run.run_dir / "logs" / "stages.jsonl").read_text(encoding="utf-8").strip()
-    )
+    record = json.loads((run.run_dir / "logs" / "stages.jsonl").read_text(encoding="utf-8").strip())
     assert record["error"] == "RuntimeError: stage failed"
 
 
