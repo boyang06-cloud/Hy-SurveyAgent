@@ -57,9 +57,7 @@ class PaperReader:
             self.config.prompt_name,
             paper_id=paper.paper_id,
             title=paper.title,
-            paper_text=render_paper_for_reading(
-                paper, max_chars=self.config.max_chars_per_paper
-            ),
+            paper_text=render_paper_for_reading(paper, max_chars=self.config.max_chars_per_paper),
         )
         return [
             {"role": "system", "content": SYSTEM_INSTRUCTION},
@@ -99,17 +97,13 @@ class PaperReader:
             async with semaphore:
                 return await asyncio.to_thread(self.read_one, paper)
 
-        results = await asyncio.gather(
-            *(_read(paper) for paper in papers), return_exceptions=True
-        )
+        results = await asyncio.gather(*(_read(paper) for paper in papers), return_exceptions=True)
 
         analyses: list[PaperAnalysis] = []
         for paper, result in zip(papers, results, strict=True):
             if isinstance(result, BaseException):
                 analyses.append(
-                    PaperAnalysis.unavailable(
-                        paper.paper_id, f"{type(result).__name__}: {result}"
-                    )
+                    PaperAnalysis.unavailable(paper.paper_id, f"{type(result).__name__}: {result}")
                 )
             else:
                 analyses.append(result)

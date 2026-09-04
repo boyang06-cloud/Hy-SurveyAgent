@@ -146,6 +146,3 @@ def _as_list(value: Any) -> list[Any]:
     if value is None:
         return []
     return list(value) if isinstance(value, (list, tuple)) else [value]
-
-
-
