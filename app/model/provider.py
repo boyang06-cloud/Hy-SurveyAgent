@@ -105,6 +105,15 @@ class LLMProvider(ABC):
 
     #: 最近一次原始响应，供调用方统计 token_usage / latency（generate_json 会同步更新）
     last_response: LLMResponse | None = None
+    #: 累计 token 消耗（按实例惰性初始化，避免类属性被多实例共享）
+    usage: dict[str, int] | None = None
+
+    def _record(self, response: LLMResponse) -> None:
+        self.last_response = response
+        if self.usage is None:
+            self.usage = {"prompt": 0, "completion": 0}
+        self.usage["prompt"] += int(response.token_usage.get("prompt", 0))
+        self.usage["completion"] += int(response.token_usage.get("completion", 0))
 
     @abstractmethod
     def generate(
@@ -135,7 +144,7 @@ class LLMProvider(ABC):
         由调用方按 Failure Handling 约定回退。
         """
         response = self.generate(messages, model, temperature, max_tokens, top_p=top_p)
-        self.last_response = response
+        self._record(response)
         try:
             return extract_json_object(response.text)
         except LLMOutputError:
@@ -147,5 +156,5 @@ class LLMProvider(ABC):
             {"role": "user", "content": REPAIR_INSTRUCTION},
         ]
         response = self.generate(repaired, model, temperature, max_tokens, top_p=top_p)
-        self.last_response = response
+        self._record(response)
         return extract_json_object(response.text)
