@@ -1,6 +1,9 @@
-"""Step 1 Pipeline：`Topic + Source Papers → Survey`。
+"""Survey Pipeline（Step 2）：`Topic + Source Papers → Paper Analysis → Survey`。
 
-后续 Step 依次在此编排中插入 Analyzer / Reader / Organizer / Planner / Verifier。
+Stage 顺序：
+    literature_manager → paper_reader → survey_writer → finalize
+
+后续 Step 依次插入 knowledge_organizer / outline_planner / citation_verifier。
 约定：每个 Stage 只消费最小必要 Context，产物写入 SurveyState 并落盘到 runs/<task_id>/。
 """
 
@@ -9,6 +12,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from app.agents.paper_reader import PaperReader, ReaderConfig
 from app.agents.writer import SimpleSurveyWriter, WriterConfig, WriterResult
 from app.config import AppConfig
 from app.core.types import PaperSet, SurveyState, TaskInput, WriterOutput
@@ -17,9 +21,11 @@ from app.model.provider import LLMError, LLMProvider, LLMResponse
 from app.prompts.loader import PromptLoader
 
 STAGE_LITERATURE = "literature_manager"
+STAGE_READER = "paper_reader"
 STAGE_WRITER = "survey_writer"
 STAGE_FINALIZE = "finalize"
 WRITER_PROMPT = "writer"
+READER_PROMPT = "paper_reader"
 
 
 class _DryRunProvider(LLMProvider):
@@ -37,7 +43,7 @@ class _DryRunProvider(LLMProvider):
         raise LLMError("dry-run 模式下不调用模型。")
 
 
-async def run_step1(
+async def run_pipeline(
     llm: LLMProvider | None,
     task: TaskInput,
     papers: PaperSet,
@@ -46,32 +52,48 @@ async def run_step1(
     config: AppConfig,
     dry_run: bool = False,
     writer_config: WriterConfig | None = None,
+    reader_config: ReaderConfig | None = None,
 ) -> dict[str, Any]:
-    """执行 Step 1 全流程，返回对齐 Evaluation 接口的结果字典。"""
+    """执行 Survey Pipeline，返回对齐 Evaluation 接口的结果字典。"""
     if llm is None and not dry_run:
         raise ValueError("dry_run=False 时必须提供 LLMProvider。")
 
     state = SurveyState(task=task, papers=list(papers.papers))
     prompts = PromptLoader(config.prompts_dir())
-    writer = SimpleSurveyWriter(
-        llm if llm is not None else _DryRunProvider(),
+    provider = llm if llm is not None else _DryRunProvider()
+    reader = PaperReader(
+        provider,
         prompts,
         config.model,
-        writer_config,
+        reader_config or ReaderConfig(max_concurrency=config.runtime.max_concurrency),
     )
+    writer = SimpleSurveyWriter(provider, prompts, config.model, writer_config)
 
     with run.stage(STAGE_LITERATURE, "task.json", "papers.json"):
         run.write_json("papers.json", [paper.to_dict() for paper in state.papers])
 
-    with run.stage(STAGE_WRITER, "papers.json", "draft.md") as stats:
+    reader_usage_before = _usage_snapshot(provider)
+    with run.stage(STAGE_READER, "papers.json", "analyses.json") as stats:
         if dry_run:
-            messages = writer.build_messages(task, papers)
+            if state.papers:
+                messages = reader.build_messages(state.papers[0])
+                run.write_text("prompts/paper_reader.rendered.md", str(messages[-1]["content"]))
+        else:
+            state.paper_analyses = await reader.read_all(state.papers)
+        stats["token_usage"] = _usage_delta(provider, reader_usage_before)
+        run.write_json("analyses.json", [item.to_dict() for item in state.paper_analyses])
+
+    writer_usage_before = _usage_snapshot(provider)
+    with run.stage(STAGE_WRITER, "analyses.json", "draft.md") as stats:
+        if dry_run:
+            messages = writer.build_messages(task, state.paper_analyses, papers)
             run.write_text("prompts/writer.rendered.md", str(messages[-1]["content"]))
             result = WriterResult(output=WriterOutput(), messages=messages)
         else:
-            result = await asyncio.to_thread(writer.write, task, papers)
-            if result.response is not None:
-                stats["token_usage"] = result.response.token_usage
+            result = await asyncio.to_thread(
+                writer.write, task, state.paper_analyses, papers
+            )
+        stats["token_usage"] = _usage_delta(provider, writer_usage_before)
         state.draft = result.output.survey_markdown
         state.claims = result.output.claims
         state.citation_map = result.output.citations
@@ -103,6 +125,16 @@ async def run_step1(
         run.write_json("result.json", payload)
 
     return payload
+
+
+def _usage_snapshot(provider: LLMProvider) -> dict[str, int]:
+    return dict(provider.usage or {"prompt": 0, "completion": 0})
+
+
+def _usage_delta(provider: LLMProvider, before: dict[str, int]) -> dict[str, int]:
+    """计算某个 Stage 内的 token 增量（Reader/Writer 可能包含多次调用）。"""
+    after = _usage_snapshot(provider)
+    return {key: after.get(key, 0) - before.get(key, 0) for key in ("prompt", "completion")}
 
 
 def build_result(task: TaskInput, state: SurveyState) -> dict[str, Any]:
