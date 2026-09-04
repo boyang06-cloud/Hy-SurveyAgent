@@ -18,9 +18,10 @@
 | `{{ topic }}` | string | 是 | 研究主题 |
 | `{{ research_questions }}` | list[string] | 否 | 研究问题，可为空 |
 | `{{ paper_count }}` | int | 是 | 可用论文数量 |
-| `{{ papers_context }}` | string | 是 | 编号后的论文信息，形如 `[P001] Title (Year) ...` |
+| `{{ analyses_context }}` | string | 是 | 编号后的论文分析结果，形如 `[P001] Title (Year) ...` |
 
-`papers_context` 中的 `[P001]` 是论文唯一标识，**只能使用其中出现过的标识**。
+`analyses_context` 中的 `[P001]` 是论文唯一标识，**只能使用其中出现过的标识**。
+分析结果已经过结构化抽取，不要把它们当作论文全文，也不要补充其中没有的信息。
 
 ## Input
 
@@ -32,10 +33,10 @@
 
 {{ research_questions }}
 
-### Source Papers（共 {{ paper_count }} 篇）
+### Source Paper Analyses（共 {{ paper_count }} 篇可用）
 
 ```text
-{{ papers_context }}
+{{ analyses_context }}
 ```
 
 ## Output Schema

@@ -1,6 +1,6 @@
-"""Survey Writer（Step 1：Simple Writer）。
+"""Survey Writer（Step 2：Simple Writer）。
 
-职责：`Topic + Source Papers → Survey 草稿 + Claims + Citations`。
+职责：`Topic + Paper Analyses → Survey 草稿 + Claims + Citations`。
 约束：只能使用输入论文集中的论文，禁止编造引用；引用编号由代码统一重排，保证可追溯。
 """
 
@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import ModelConfig
-from app.core.types import Citation, Claim, PaperSet, TaskInput, WriterOutput
-from app.io.loader import render_papers_context
+from app.core.types import Citation, Claim, PaperAnalysis, PaperSet, TaskInput, WriterOutput
+from app.io.render import MAX_ANALYSIS_CHARS, render_analyses_context
 from app.model.provider import LLMProvider, LLMResponse, Message
 from app.prompts.loader import PromptLoader
 
@@ -36,7 +36,7 @@ class WriterConfig:
 
     prompt_name: str = "writer"
     max_papers: int | None = None
-    max_chars_per_paper: int = 6000
+    max_chars_per_paper: int = MAX_ANALYSIS_CHARS
 
 
 @dataclass
@@ -49,7 +49,7 @@ class WriterResult:
 
 
 class SimpleSurveyWriter:
-    """Step 1 的 Writer：直接基于论文上下文生成 Survey（Step 3 起改为按 Outline 分节写作）。"""
+    """Step 2 的 Writer：基于论文分析结果一次性生成 Survey（Step 3 起改为按 Outline 分节写作）。"""
 
     def __init__(
         self,
@@ -63,28 +63,40 @@ class SimpleSurveyWriter:
         self.model = model
         self.config = config or WriterConfig()
 
-    def build_messages(self, task: TaskInput, papers: PaperSet) -> list[Message]:
-        context = render_papers_context(
+    def build_messages(
+        self,
+        task: TaskInput,
+        analyses: list[PaperAnalysis],
+        papers: PaperSet,
+    ) -> list[Message]:
+        """只注入可用分析的精简表示，不再携带论文全文。"""
+        context = render_analyses_context(
+            analyses,
             papers,
             max_papers=self.config.max_papers,
-            max_chars_per_paper=self.config.max_chars_per_paper,
+            max_chars=self.config.max_chars_per_paper,
         )
         rendered = self.prompts.render(
             self.config.prompt_name,
             topic=task.topic,
             research_questions=task.research_questions,
-            paper_count=len(papers),
-            papers_context=context,
+            paper_count=sum(1 for analysis in analyses if analysis.available),
+            analyses_context=context,
         )
         return [
             {"role": "system", "content": SYSTEM_INSTRUCTION},
             {"role": "user", "content": rendered},
         ]
 
-    def write(self, task: TaskInput, papers: PaperSet) -> WriterResult:
-        if not papers.papers:
-            raise WriterError("论文集为空，无法撰写 Survey。")
-        messages = self.build_messages(task, papers)
+    def write(
+        self,
+        task: TaskInput,
+        analyses: list[PaperAnalysis],
+        papers: PaperSet,
+    ) -> WriterResult:
+        if not any(analysis.available for analysis in analyses):
+            raise WriterError("没有可用的论文分析结果，无法撰写 Survey。")
+        messages = self.build_messages(task, analyses, papers)
         payload = self.llm.generate_json(
             messages,
             self.model.name,
