@@ -9,10 +9,25 @@ from typing import Any
 
 import pytest
 
-from app.core.types import Paper, PaperSet
+from app.core.types import Paper, PaperAnalysis, PaperSet
 from app.model.provider import LLMProvider, LLMResponse
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+SAMPLE_ANALYSIS_PAYLOAD = {
+    "problem": "Driving planners cannot use natural-language route instructions.",
+    "method": "A multimodal transformer fuses camera tokens with route instructions.",
+    "key_idea": "Treat route instructions as a first-class planning input.",
+    "dataset": ["nuScenes"],
+    "advantages": ["The text branch can be disabled at inference"],
+    "limitations": ["Only evaluated in open-loop settings"],
+    "claims": [
+        {
+            "text": "Adding the text branch reduces L2 error from 1.4m to 1.1m.",
+            "evidence": "Table 2: baseline 1.4m, with text branch 1.1m.",
+        }
+    ],
+}
 
 SAMPLE_RECORDS: list[dict[str, Any]] = [
     {
@@ -81,6 +96,18 @@ def scripted_provider():
 @pytest.fixture
 def sample_papers() -> PaperSet:
     return PaperSet(papers=[Paper.from_dict(record) for record in SAMPLE_RECORDS])
+
+
+@pytest.fixture
+def sample_analyses(sample_papers: PaperSet) -> list[PaperAnalysis]:
+    """每篇论文一份分析结果；内容带 paper_id 后缀，便于断言顺序。"""
+    return [
+        PaperAnalysis.from_dict(
+            {**SAMPLE_ANALYSIS_PAYLOAD, "key_idea": f"Idea of {paper.paper_id}"},
+            paper_id=paper.paper_id,
+        )
+        for paper in sample_papers
+    ]
 
 
 @pytest.fixture

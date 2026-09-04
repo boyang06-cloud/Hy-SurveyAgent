@@ -8,7 +8,7 @@ import pytest
 
 from app.agents.writer import SimpleSurveyWriter, WriterError
 from app.config import ModelConfig
-from app.core.types import PaperSet, TaskInput
+from app.core.types import PaperAnalysis, PaperSet, TaskInput, WriterOutput
 from app.prompts.loader import PromptLoader
 
 
@@ -16,18 +16,36 @@ def make_writer(prompt_dir: Path, llm: object) -> SimpleSurveyWriter:
     return SimpleSurveyWriter(llm, PromptLoader(prompt_dir), ModelConfig())  # type: ignore[arg-type]
 
 
-def test_build_messages_renders_topic_and_papers(prompt_dir: Path, sample_papers: PaperSet) -> None:
+def test_build_messages_renders_analyses(
+    prompt_dir: Path, sample_papers: PaperSet, sample_analyses: list[PaperAnalysis]
+) -> None:
     writer = make_writer(prompt_dir, object())
-    messages = writer.build_messages(TaskInput(topic="Unit Topic"), sample_papers)
-    assert messages[0]["role"] == "system"
+    messages = writer.build_messages(TaskInput(topic="Unit Topic"), sample_analyses, sample_papers)
     content = messages[-1]["content"]
+    assert messages[0]["role"] == "system"
     assert "Unit Topic" in content
     assert "[P001]" in content
+    assert "Idea of P001" in content  # 注入的是分析结果而非论文全文
     assert "{{" not in content
 
 
+def test_build_messages_skips_unavailable_analyses(
+    prompt_dir: Path, sample_papers: PaperSet, sample_analyses: list[PaperAnalysis]
+) -> None:
+    sample_analyses[1] = PaperAnalysis.unavailable("P002", "读取失败")
+    writer = make_writer(prompt_dir, object())
+    content = writer.build_messages(
+        TaskInput(topic="Unit Topic"), sample_analyses, sample_papers
+    )[-1]["content"]
+    assert "Idea of P001" in content
+    assert "Idea of P002" not in content
+
+
 def test_write_parses_model_output(
-    prompt_dir: Path, sample_papers: PaperSet, scripted_provider
+    prompt_dir: Path,
+    sample_papers: PaperSet,
+    sample_analyses: list[PaperAnalysis],
+    scripted_provider,
 ) -> None:
     llm = scripted_provider(
         [
@@ -39,7 +57,7 @@ def test_write_parses_model_output(
         ]
     )
     writer = make_writer(prompt_dir, llm)
-    result = writer.write(TaskInput(topic="Unit Topic"), sample_papers)
+    result = writer.write(TaskInput(topic="Unit Topic"), sample_analyses, sample_papers)
 
     assert len(llm.calls) == 1
     assert llm.calls[0]["model"] == ModelConfig().name
@@ -48,10 +66,13 @@ def test_write_parses_model_output(
     assert "## References" in result.output.survey_markdown
 
 
-def test_write_requires_non_empty_papers(prompt_dir: Path, scripted_provider) -> None:
+def test_write_requires_available_analyses(
+    prompt_dir: Path, sample_papers: PaperSet, scripted_provider
+) -> None:
     writer = make_writer(prompt_dir, scripted_provider([]))
-    with pytest.raises(WriterError, match="论文集为空"):
-        writer.write(TaskInput(topic="Unit Topic"), PaperSet())
+    analyses = [PaperAnalysis.unavailable("P001", "读取失败")]
+    with pytest.raises(WriterError, match="没有可用的论文分析结果"):
+        writer.write(TaskInput(topic="Unit Topic"), analyses, sample_papers)
 
 
 def test_parse_renumbers_by_first_appearance(
@@ -155,3 +176,21 @@ def test_parse_appends_references_when_missing(
     )
     expected = "[1] Vision-Language Models for Driving (2024). ExampleConf 2024"
     assert output.survey_markdown.rstrip().endswith(expected)
+
+
+def test_parse_rejects_non_string_markdown(
+    prompt_dir: Path, sample_papers: PaperSet, scripted_provider
+) -> None:
+    writer = make_writer(prompt_dir, scripted_provider([]))
+    with pytest.raises(WriterError, match="survey_markdown"):
+        writer.parse({"survey_markdown": 123}, sample_papers)
+
+
+def test_writer_output_to_dict_shape() -> None:
+    payload = WriterOutput(survey_markdown="body").to_dict()
+    assert set(payload) == {
+        "survey_markdown",
+        "claims",
+        "citations",
+        "unknown_citations",
+    }
