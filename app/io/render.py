@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from app.core.types import (
+    Citation,
+    Claim,
     KnowledgeBase,
     OutlineSection,
     Paper,
@@ -128,6 +130,76 @@ def render_claims_context(
             suffix = f" (evidence: {evidence})" if evidence else ""
             lines.append(f"- {claim.claim_id}: {claim.text}{suffix}")
     return "\n".join(lines) if lines else "（无论文级 Claim 可用）"
+
+
+def render_paper_evidence(
+    analysis: PaperAnalysis,
+    papers: PaperSet,
+    *,
+    max_claims: int = 5,
+    max_chars_per_evidence: int = 200,
+) -> str:
+    """渲染单篇论文的定位证据，供 Citation Verifier 判断 Claim 是否被支持。"""
+    paper = papers.get(analysis.paper_id)
+    title = paper.label() if paper else analysis.paper_id
+    lines = [f"[{analysis.paper_id}] {title}"]
+    _append(lines, "Key idea", analysis.key_idea)
+    _append(lines, "Method", analysis.method)
+    if analysis.results:
+        lines.append("Results:\n" + _bullets(analysis.results[:5]))
+    if analysis.claims:
+        bullets = []
+        for claim in analysis.claims[:max_claims]:
+            evidence = _truncate(claim.evidence, max_chars_per_evidence) if claim.evidence else ""
+            suffix = f" (evidence: {evidence})" if evidence else ""
+            bullets.append(f"- {claim.claim_id}: {claim.text}{suffix}")
+        lines.append("Key claims:\n" + "\n".join(bullets))
+    return "\n".join(lines)
+
+
+def render_verification_context(
+    claims: list[Claim],
+    citation_map: list[Citation],
+    analyses: list[PaperAnalysis],
+    papers: PaperSet,
+    *,
+    max_claims_per_paper: int = 5,
+    max_chars_per_evidence: int = 200,
+) -> str:
+    """渲染待核验 Claim 及其被引论文的定位证据（不含无关论文，最小必要 Context）。"""
+    if not claims:
+        return "（无 Claim 可核验）"
+    analyses_by_id = {analysis.paper_id: analysis for analysis in analyses if analysis.available}
+    citation_to_paper = {citation.citation_id: citation.paper_id for citation in citation_map}
+
+    def _resolve(ref: str) -> str:
+        return ref if ref in analyses_by_id else citation_to_paper.get(ref, ref)
+
+    blocks: list[str] = []
+    for claim in claims:
+        lines = [f"Claim {claim.claim_id}: {claim.text}"]
+        paper_ids = [_resolve(ref) for ref in claim.citations]
+        if not paper_ids:
+            lines.append("Citations: （无）")
+            lines.append("Evidence: （该 Claim 没有可核验的引用）")
+        else:
+            lines.append("Citations: " + ", ".join(paper_ids))
+            for paper_id in paper_ids:
+                analysis = analyses_by_id.get(paper_id)
+                if analysis is None:
+                    lines.append(f"Evidence for {paper_id}: （该论文不可用或无分析结果）")
+                else:
+                    lines.append(f"Evidence for {paper_id}:")
+                    lines.append(
+                        render_paper_evidence(
+                            analysis,
+                            papers,
+                            max_claims=max_claims_per_paper,
+                            max_chars_per_evidence=max_chars_per_evidence,
+                        )
+                    )
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
 
 
 def render_section_evidence(
