@@ -35,6 +35,17 @@ WRITER_PAYLOAD = {
     "content": "Vision-language models support driving [[P001]].",
     "claims": [{"text": "VLMs support driving", "citations": ["P001"]}],
 }
+VERIFIER_PAYLOAD = {
+    "results": [
+        {
+            "claim_id": "C001",
+            "citation": "P001",
+            "support": True,
+            "evidence": "Applies a vision-language model to driving scenes and reports results.",
+            "confidence": 0.9,
+        }
+    ]
+}
 
 STAGE_ORDER = [
     "literature_manager",
@@ -42,6 +53,7 @@ STAGE_ORDER = [
     "knowledge_organizer",
     "outline_planner",
     "survey_writer",
+    "citation_verifier",
     "finalize",
 ]
 
@@ -65,7 +77,7 @@ def read_stage_logs(run):
 
 
 def scripted_step2_responses(scripted_provider):
-    """Reader 2 次 + Organizer 1 次 + Planner 1 次 + Writer 2 次。"""
+    """Reader 2 次 + Organizer 1 次 + Planner 1 次 + Writer 2 次 + Verifier 1 次。"""
     return scripted_provider(
         [
             SAMPLE_ANALYSIS_PAYLOAD,
@@ -74,6 +86,7 @@ def scripted_step2_responses(scripted_provider):
             PLANNER_PAYLOAD,
             WRITER_PAYLOAD,
             WRITER_PAYLOAD,
+            VERIFIER_PAYLOAD,
         ]
     )
 
@@ -101,7 +114,14 @@ def test_run_pipeline_writes_all_artifacts(tmp_path, prompt_dir, sample_papers, 
     assert read_json(run.path("result.json")) == payload
     assert run.path("draft.md").read_text(encoding="utf-8") == payload["survey"]
     assert run.path("final.md").read_text(encoding="utf-8") == payload["survey"]
-    assert read_json(run.path("verification.json"))["summary"]["total_claims"] == 2
+    verification = read_json(run.path("verification.json"))
+    assert verification["summary"]["total_claims"] == 2
+    assert verification["summary"]["supported"] == 1
+    assert verification["summary"]["unverifiable"] == 1  # C001 已核验，C002 由系统补齐
+    assert verification["results"][0]["support"] is True
+    assert verification["results"][0]["evidence"]
+    # Step 4 起 evidence_map 来自真实核验结果（Evaluation 接口）
+    assert payload["evidence_map"] == verification["results"]
 
 
 def test_run_pipeline_logs_every_stage_with_usage(
@@ -121,6 +141,7 @@ def test_run_pipeline_logs_every_stage_with_usage(
     assert usage["knowledge_organizer"] == {"prompt": 10, "completion": 20}
     assert usage["outline_planner"] == {"prompt": 10, "completion": 20}
     assert usage["survey_writer"] == {"prompt": 20, "completion": 40}
+    assert usage["citation_verifier"] == {"prompt": 10, "completion": 20}
 
 
 def test_run_pipeline_continues_when_one_paper_fails(
@@ -155,8 +176,70 @@ def test_run_pipeline_dry_run_renders_all_prompts(tmp_path, prompt_dir, sample_p
     assert (prompts / "organizer.rendered.md").is_file()
     assert (prompts / "planner.rendered.md").is_file()
     assert (prompts / "writer" / "01.rendered.md").is_file()
+    assert (prompts / "citation_verifier.rendered.md").is_file()
     assert "Unit Topic" in (prompts / "writer" / "01.rendered.md").read_text(encoding="utf-8")
     assert payload["survey"] == ""
+
+
+def test_run_pipeline_skips_verifier_when_disabled(
+    tmp_path, prompt_dir, sample_papers, scripted_provider
+):
+    config = build_config(tmp_path, prompt_dir)
+    config.pipeline.enable_citation_verification = False
+    run = RunWriter.create(tmp_path, "runs", "t-step4-disabled")
+    llm = scripted_provider(
+        [
+            SAMPLE_ANALYSIS_PAYLOAD,
+            SAMPLE_ANALYSIS_PAYLOAD,
+            ORGANIZER_PAYLOAD,
+            PLANNER_PAYLOAD,
+            WRITER_PAYLOAD,
+            WRITER_PAYLOAD,
+        ]
+    )
+
+    asyncio.run(run_pipeline(llm, TaskInput(topic="Unit Topic"), sample_papers, run, config=config))
+
+    assert len(llm.calls) == 6  # Verifier 未消耗模型调用
+    verification = read_json(run.path("verification.json"))
+    assert verification["summary"] == {
+        "total_claims": 2,
+        "supported": 0,
+        "unsupported": 0,
+        "unverifiable": 2,
+    }
+    assert all(r["error"] for r in verification["results"])
+
+
+def test_run_pipeline_degrades_when_verifier_fails(
+    tmp_path, prompt_dir, sample_papers, scripted_provider
+):
+    config = build_config(tmp_path, prompt_dir)
+    run = RunWriter.create(tmp_path, "runs", "t-step4-fail")
+    # Verifier 单批两次解析均失败（含 repair 重试）→ 降级为 unverifiable，不中断
+    llm = scripted_provider(
+        [
+            SAMPLE_ANALYSIS_PAYLOAD,
+            SAMPLE_ANALYSIS_PAYLOAD,
+            ORGANIZER_PAYLOAD,
+            PLANNER_PAYLOAD,
+            WRITER_PAYLOAD,
+            WRITER_PAYLOAD,
+            "bad",
+            "bad",
+        ]
+    )
+
+    payload = asyncio.run(
+        run_pipeline(llm, TaskInput(topic="Unit Topic"), sample_papers, run, config=config)
+    )
+
+    verification = read_json(run.path("verification.json"))
+    assert verification["summary"]["unverifiable"] == 2
+    assert "LLMOutputError" in verification["error"]
+    assert payload["survey"]  # Pipeline 正常完成
+    records = read_stage_logs(run)
+    assert [r["stage"] for r in records] == STAGE_ORDER
 
 
 def test_run_pipeline_requires_provider_without_dry_run(tmp_path, prompt_dir, sample_papers):
