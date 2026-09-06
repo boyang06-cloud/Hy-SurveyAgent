@@ -522,6 +522,7 @@ class Verification:
         """
         dropped = 0
         results: list[VerificationResult] = []
+        seen_pairs: set[tuple[str, str]] = set()
         for item in _obj_list(data.get("results")):
             claim_id = _as_str(item.get("claim_id"))
             if claim_id not in known_claims:
@@ -531,6 +532,12 @@ class Verification:
             if not citation and _as_str(item.get("citation")):
                 dropped += 1
                 continue
+            # 同一 (Claim, 引用) 只保留第一条，防止模型重复输出导致证据重复计数
+            pair = (claim_id, citation)
+            if pair in seen_pairs:
+                dropped += 1
+                continue
+            seen_pairs.add(pair)
             evidence = _as_str(item.get("evidence"))
             results.append(
                 VerificationResult(

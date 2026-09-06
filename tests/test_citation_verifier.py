@@ -158,6 +158,36 @@ def test_verify_drops_unknown_claim_ids(
     assert verification.dropped == 1
 
 
+def test_from_dict_deduplicates_repeated_pairs():
+    """同一 (Claim, 引用) 重复输出只保留第一条，其余计数丢弃。"""
+    from app.core.types import Verification
+
+    payload = {
+        "results": [
+            {
+                "claim_id": "C001",
+                "citation": "P001",
+                "support": True,
+                "evidence": "first",
+                "confidence": 0.9,
+            },
+            {
+                "claim_id": "C001",
+                "citation": "P001",
+                "support": False,
+                "evidence": "dup",
+                "confidence": 0.1,
+            },
+        ]
+    }
+    verification = Verification.from_dict(
+        payload, known_claims={"C001"}, resolve_citation=lambda value: str(value or "")
+    )
+    assert len(verification.results) == 1
+    assert verification.results[0].evidence == "first"
+    assert verification.dropped == 1
+
+
 def test_verify_degrades_on_invalid_json(
     prompt_dir: Path, sample_analyses, sample_papers: PaperSet, scripted_provider
 ) -> None:
