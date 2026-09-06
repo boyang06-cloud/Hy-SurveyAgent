@@ -178,8 +178,9 @@ Hy-SurveyAgent/
 
 ```python
 class LLMProvider:
-    def generate(self, messages: list[dict], model: str,
-                 temperature: float, max_tokens: int) -> LLMResponse: ...
+    def generate(
+        self, messages: list[dict], model: str, temperature: float, max_tokens: int
+    ) -> LLMResponse: ...
 ```
 
 - Hy3 SDK 的 import **只允许出现在 `app/model/hy3_adapter.py`**。
