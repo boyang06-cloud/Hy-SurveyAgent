@@ -124,9 +124,10 @@ def validate_result_payload(payload: dict[str, Any]) -> list[str]:
         if not isinstance(claim, dict):
             errors.append(f"claims[{index}] 必须是对象")
             continue
+        claim_id = str(claim.get("claim_id", "") or "")
         for ref in claim.get("citations", []) or []:
             if paper_ids is not None and str(ref) not in paper_ids:
-                errors.append(f"claims[{index}] 引用了未知论文：{ref}")
+                errors.append(f"claim {claim_id or index} 引用了未知论文：{ref}")
 
     for index, entry in enumerate(payload["evidence_map"]):
         if not isinstance(entry, dict):
