@@ -1,11 +1,12 @@
-"""Survey Pipeline（Step 3）：完整的多阶段 Agent Workflow。
+"""Survey Pipeline（Step 4）：完整的多阶段 Agent Workflow。
 
 Stage 顺序：
     literature_manager → paper_reader → knowledge_organizer
-    → outline_planner → survey_writer → finalize
+    → outline_planner → survey_writer → citation_verifier → finalize
 
 约定：每个 Stage 只消费最小必要 Context，产物写入 SurveyState 并落盘到 runs/<task_id>/；
-关键 Stage（organizer / planner）无合法产物时整体中止，其余 Stage 单点失败可降级。
+关键 Stage（organizer / planner）无合法产物时整体中止，其余 Stage 单点失败可降级
+（Citation Verifier 由 `pipeline.enable_citation_verification` 控制开关）。
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from app.agents.citation_verifier import CitationVerifier
 from app.agents.organizer import KnowledgeOrganizer
 from app.agents.paper_reader import PaperReader, ReaderConfig
 from app.agents.planner import OutlinePlanner
@@ -25,6 +27,7 @@ from app.core.types import (
     PaperSet,
     SurveyState,
     TaskInput,
+    Verification,
     WriterOutput,
 )
 from app.io.exporter import RunWriter
@@ -36,8 +39,9 @@ STAGE_READER = "paper_reader"
 STAGE_ORGANIZER = "knowledge_organizer"
 STAGE_PLANNER = "outline_planner"
 STAGE_WRITER = "survey_writer"
+STAGE_VERIFIER = "citation_verifier"
 STAGE_FINALIZE = "finalize"
-PROMPTS = ("paper_reader", "organizer", "planner", "writer")
+PROMPTS = ("paper_reader", "organizer", "planner", "writer", "citation_verifier")
 
 
 class _DryRunProvider(LLMProvider):
@@ -82,6 +86,7 @@ async def run_pipeline(
     organizer = KnowledgeOrganizer(provider, prompts, config.model)
     planner = OutlinePlanner(provider, prompts, config.model)
     writer = SurveyWriter(provider, prompts, config.model, writer_config)
+    verifier = CitationVerifier(provider, prompts, config.model)
 
     with run.stage(STAGE_LITERATURE, "task.json", "papers.json"):
         run.write_json("papers.json", [paper.to_dict() for paper in state.papers])
@@ -148,20 +153,30 @@ async def run_pipeline(
             },
         )
 
-    with run.stage(STAGE_FINALIZE, "draft.md", "result.json"):
-        state.final_survey = state.draft
-        # Step 4 接入 Citation Verifier 后由核验结果填充；此处保持结构稳定
-        state.verification = {
-            "results": [],
-            "summary": {
-                "total_claims": len(state.claims),
-                "supported": 0,
-                "unsupported": 0,
-                "unverifiable": len(state.claims),
-            },
-        }
-        run.write_text("final.md", state.final_survey)
+    verifier_before = _usage_snapshot(provider)
+    with run.stage(STAGE_VERIFIER, "claims.json", "verification.json") as stats:
+        if dry_run:
+            messages = verifier.build_messages(
+                state.claims, state.citation_map, state.paper_analyses, papers
+            )
+            run.write_text("prompts/citation_verifier.rendered.md", str(messages[-1]["content"]))
+            state.verification = Verification().to_dict()
+        elif not config.pipeline.enable_citation_verification:
+            # 核验被配置禁用：全部 Claim 记为 unverifiable，不调用模型
+            state.verification = Verification.unverified(
+                state.claims, reason="citation verification 已禁用"
+            ).to_dict()
+        else:
+            verification = await asyncio.to_thread(
+                verifier.verify, state.claims, state.citation_map, state.paper_analyses, papers
+            )
+            state.verification = verification.to_dict()
+        stats["token_usage"] = _usage_delta(provider, verifier_before)
         run.write_json("verification.json", state.verification)
+
+    with run.stage(STAGE_FINALIZE, "verification.json", "result.json"):
+        state.final_survey = state.draft
+        run.write_text("final.md", state.final_survey)
         payload = build_result(task, state)
         run.write_json("result.json", payload)
 
