@@ -31,6 +31,28 @@ def _obj_list(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)]
 
 
+def _as_support(value: Any) -> bool | None:
+    """归一化 support：布尔 / 常见字符串表述 / 0-1 数字；无法识别视为证据不足。"""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in ("true", "supported", "yes", "1"):
+        return True
+    if text in ("false", "unsupported", "no", "0"):
+        return False
+    return None
+
+
+def _as_confidence(value: Any) -> float:
+    """归一化 confidence 到 [0, 1]；缺失或非法值返回 0。"""
+    try:
+        return min(1.0, max(0.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _as_year(value: Any) -> int | None:
     if value is None or value == "":
         return None
@@ -420,6 +442,120 @@ class Citation:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class VerificationResult:
+    """单条 Claim 对单个被引论文的核验结果（Step 4）。
+
+    `support` 取值：True（证据支持）/ False（证据矛盾）/ None（证据不足，无法判定）。
+    """
+
+    claim_id: str
+    citation: str
+    support: bool | None = None
+    evidence: str = ""
+    confidence: float = 0.0
+    error: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "claim_id": self.claim_id,
+            "citation": self.citation,
+            "support": self.support,
+            "evidence": self.evidence,
+            "confidence": self.confidence,
+            "error": self.error,
+        }
+
+
+@dataclass
+class Verification:
+    """Citation Verifier 输出：Claim → Citation → Paper → Evidence 的核验链路。
+
+    每条 Claim 至少产生一条结果（无引用的 Claim 记一条 `citation=""` 的
+    unverifiable 结果），保证 `summary.total_claims` 覆盖全部待核验 Claim。
+    """
+
+    results: list[VerificationResult] = field(default_factory=list)
+    dropped: int = 0
+    error: str = ""
+
+    def summary(self) -> dict[str, int]:
+        """按 Claim 聚合 supported / unsupported / unverifiable 三类计数。"""
+        by_claim: dict[str, list[VerificationResult]] = {}
+        for result in self.results:
+            by_claim.setdefault(result.claim_id, []).append(result)
+        supported = sum(
+            1 for entries in by_claim.values() if all(r.support is True for r in entries)
+        )
+        unsupported = sum(
+            1 for entries in by_claim.values() if any(r.support is False for r in entries)
+        )
+        return {
+            "total_claims": len(by_claim),
+            "supported": supported,
+            "unsupported": unsupported,
+            "unverifiable": len(by_claim) - supported - unsupported,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "results": [result.to_dict() for result in self.results],
+            "summary": self.summary(),
+        }
+        if self.error:
+            payload["error"] = self.error
+        return payload
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        known_claims: set[str],
+        resolve_citation: Any,
+    ) -> Verification:
+        """归一化模型输出：丢弃未知 Claim 与无法解析的引用并计数。
+
+        `resolve_citation(value)` 把模型给出的引用（论文 ID 或正文编号 `[n]`）
+        解析为 `paper_id`，解析失败返回空字符串（结果保留但标记 error）。
+        """
+        dropped = 0
+        results: list[VerificationResult] = []
+        for item in _obj_list(data.get("results")):
+            claim_id = _as_str(item.get("claim_id"))
+            if claim_id not in known_claims:
+                dropped += 1
+                continue
+            citation = resolve_citation(item.get("citation"))
+            if not citation and _as_str(item.get("citation")):
+                dropped += 1
+                continue
+            evidence = _as_str(item.get("evidence"))
+            results.append(
+                VerificationResult(
+                    claim_id=claim_id,
+                    citation=citation,
+                    support=_as_support(item.get("support")),
+                    evidence=evidence,
+                    confidence=_as_confidence(item.get("confidence")),
+                )
+            )
+        return cls(results=results, dropped=dropped)
+
+    @classmethod
+    def unverified(cls, claims: list[Claim], error: str = "", reason: str = "") -> Verification:
+        """构造全部 Claim 均不可核验的降级结果（核验被禁用或整体失败时使用）。"""
+        results = [
+            VerificationResult(
+                claim_id=claim.claim_id,
+                citation=claim.citations[0] if claim.citations else "",
+                support=None,
+                error=reason or "未执行核验",
+            )
+            for claim in claims
+        ]
+        return cls(results=results, error=error)
 
 
 @dataclass
