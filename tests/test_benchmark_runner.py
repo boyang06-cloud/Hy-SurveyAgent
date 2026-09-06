@@ -7,7 +7,7 @@ from pathlib import Path
 
 from app.benchmark.runner import BenchmarkRunner
 from app.config import AppConfig
-from tests.conftest import SAMPLE_ANALYSIS_PAYLOAD
+from tests.conftest import SAMPLE_ANALYSIS_PAYLOAD, ScriptedProvider
 from tests.test_pipeline import ORGANIZER_PAYLOAD, PLANNER_PAYLOAD, VERIFIER_PAYLOAD, WRITER_PAYLOAD
 
 FULL_TASK_RESPONSES = [
@@ -131,3 +131,69 @@ def test_run_batch_respects_limit(tmp_path, prompt_dir, sample_papers, scripted_
 
     assert summary["total"] == 1
     assert summary["tasks"][0]["task_id"] == "task-0"
+
+
+def test_cli_runs_batch_and_reports_exit_code(
+    tmp_path, prompt_dir, sample_papers, scripted_provider, monkeypatch, capsys
+):
+    from app.benchmark import cli
+
+    papers = make_papers_file(tmp_path)
+    manifest = write_manifest(
+        tmp_path,
+        [{"task_id": "task-a", "topic": "Topic A", "papers": str(papers)}],
+    )
+    config = AppConfig(root=tmp_path)
+    config.paths.prompts_dir = str(prompt_dir)
+
+    class FakeAdapter(ScriptedProvider):
+        @classmethod
+        def from_config(cls, config, client=None):
+            return cls(FULL_TASK_RESPONSES)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return None
+
+    monkeypatch.setattr(cli, "Hy3Adapter", FakeAdapter)
+
+    exit_code = cli.main(["--manifest", str(manifest)])
+
+    captured = capsys.readouterr().out
+    assert exit_code == 0
+    assert "task-a" in captured
+    assert "成功 1，失败 0" in captured
+
+
+def test_cli_returns_1_when_task_fails(
+    tmp_path, prompt_dir, sample_papers, scripted_provider, monkeypatch
+):
+    from app.benchmark import cli
+
+    papers = make_papers_file(tmp_path)
+    manifest = write_manifest(
+        tmp_path,
+        [{"task_id": "task-a", "topic": "Topic A", "papers": str(papers)}],
+    )
+    config = AppConfig(root=tmp_path)
+    config.paths.prompts_dir = str(prompt_dir)
+
+    class FakeAdapter(ScriptedProvider):
+        @classmethod
+        def from_config(cls, config, client=None):
+            # 不准备任何响应 → 任务失败
+            return cls([])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return None
+
+    monkeypatch.setattr(cli, "Hy3Adapter", FakeAdapter)
+
+    exit_code = cli.main(["--manifest", str(manifest)])
+
+    assert exit_code == 1
