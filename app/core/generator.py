@@ -61,7 +61,10 @@ class HySurveyAgentGenerator(SurveyGenerator):
         self.config = config
         self.run_id = run_id
 
-    def generate(self, topic: str, papers: PaperSet) -> SurveyOutput:
+    def generate(
+        self, topic: str, papers: PaperSet, *, run: RunWriter | None = None
+    ) -> SurveyOutput:
+        """执行一次完整 Pipeline；`run` 缺省时自动创建新的运行目录。"""
         topic = topic.strip()
         if not topic:
             raise ValueError("研究主题为空。")
@@ -69,7 +72,7 @@ class HySurveyAgentGenerator(SurveyGenerator):
             raise ValueError("论文集合为空。")
 
         task = TaskInput(topic=topic)
-        run = RunWriter.create(
+        run = run or RunWriter.create(
             self.config.root, self.config.paths.runs_dir, self.run_id, topic=topic
         )
         payload = asyncio.run(run_pipeline(self.llm, task, papers, run, config=self.config))
