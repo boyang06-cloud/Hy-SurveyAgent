@@ -11,19 +11,22 @@
 
 ## 开发进度（2026-09-06）
 
-- Step 1–5 全部完成并各自分多次 commit：Pipeline 为 7 个 Stage
-  （literature_manager → paper_reader → knowledge_organizer → outline_planner → survey_writer → citation_verifier → finalize）。
-- Step 4（Citation Verifier）：Verification/VerificationResult 数据模型（support ∈ {True/False/None}，summary 按 Claim 聚合）、
-  `citation_verifier.py` Agent（分批调用、单批失败降级 unverifiable、`_fill_unassessed` 补漏、去重）、
-  六段式 Prompt（v0.1.0）、`pipeline.enable_citation_verification` 开关；evidence_map 进入 result.json。
-- Step 5（Evaluation 契约）：`app/core/contract.py` 集中定义六字段最终输出 + `eval_payload.json`
-  机器可读合并结果 + `validate_result_payload` 结构校验（失败抛 ContractError）；evidence_map 中
-  `citation` → `paper_id` 对齐契约；`app/core/generator.py` 提供 `SurveyGenerator` ABC +
-  `HySurveyAgentGenerator`（architecture 第 12 节统一生成器接口）。
-- 动态测试基建：`/tmp/fake_hy3.py` 假 OpenAI 兼容服务端（端口 8765）按 Prompt 标识分发，支持故障注入；
-  用后删除。dispatch 取第一条 user 消息；解析 ID 需排除 Prompt 的 Schema 表格与 few-shot 示例。
+- **Application 侧 Step 1–6 全部完成**，各自分多次 commit（均未 push）。
+  Pipeline 7 个 Stage：literature_manager → paper_reader → knowledge_organizer → outline_planner
+  → survey_writer → citation_verifier → finalize。
+- Step 4（Citation Verifier）：Verification 数据模型、Agent（分批/降级/补漏/去重）、Prompt v0.1.0、
+  `pipeline.enable_citation_verification` 开关。
+- Step 5（Evaluation 契约）：`app/core/contract.py`（六字段最终输出 + `eval_payload.json` 合并结果 +
+  `validate_result_payload` 校验，违规抛 ContractError）；evidence_map `citation`→`paper_id`；
+  `app/core/generator.py`：`SurveyGenerator` ABC + `HySurveyAgentGenerator`（统一生成器接口）。
+- Step 6（Benchmark Batch Runner）：`app/benchmark/`（manifest 加载 + `BenchmarkRunner` + CLI
+  `python -m app.benchmark`）；批量执行记录 latency/token（cost 代理）/产物计数/契约校验，
+  单任务失败隔离，汇总落 `results/benchmark/<batch_id>/summary.json`；示例清单
+  `examples/benchmark_manifest.jsonl`。坑：CLI 测试必须给 `--config` 传绝对路径配置隔离产物。
+- 动态测试基建：`/tmp/fake_hy3.py` 假 OpenAI 兼容服务端（端口 8765）按 Prompt 标识分发，支持故障注入；用后删除。
+  dispatch 取第一条 user 消息；解析 ID 需排除 Prompt 的 Schema 表格与 few-shot 示例。
 - 已修复 bug：Reader 曾信任模型回显 paper_id（few-shot P001 污染）；Verification.from_dict 曾不去重 (claim, citation)。
-- 测试 104 个全过（ruff/mypy/check_repo 干净）；动态测试覆盖 dry-run、正常端到端、单篇失败降级、契约输出。
-- 工程教训：pytest 经 `| tail` 会吞退出码，提交前检查要直接用 pytest 退出码；git add 清单需逐文件核对。
-- 下一步：Step 6 Benchmark Batch Runner。
+- 测试 116 个全过（ruff/mypy/check_repo 干净）。
+- 工程教训：pytest 经 `| tail` 会吞退出码；git add 清单逐文件核对；CLI 测试注意 load_config 的 root。
+- 后续方向：Evaluation 打分与 benchmark 数据底座属 evaluator 侧；Baseline 实现（SimplePromptGenerator 等）。
 - 待办：`docs/Hy-SurveyAgent Application 开发文档.md` 与 `AGENTS.md` 有用户侧 markdown 格式化改动未提交，需用户确认后再处理。
