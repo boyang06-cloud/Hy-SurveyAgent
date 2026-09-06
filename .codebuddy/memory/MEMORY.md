@@ -9,12 +9,21 @@
 - 环境备注：系统 python 为 3.8，实际使用 uv 管理的 3.11；uv 可执行文件经 `PATH="/root/.workbuddy/binaries/python/versions/3.14.3/bin:$PATH"` 暴露。
 - Hy3 是腾讯混元开源模型（2026-07），提供 OpenAI 兼容的 Chat Completions 接口（`POST {base_url}/chat/completions`），Adapter 只在 `app/model/hy3_adapter.py`。
 
-## 开发进度（2026-09-04）
+## 开发进度（2026-09-06）
 
-- Step 1（Adapter + Loader + Simple Writer）、Step 2（Literature Manager + Paper Reader 并行）、
-  Step 3（Knowledge Organizer + Outline Planner + 按 Outline 分节写作）已完成并各自分多次 commit。
-- Pipeline 6 个 Stage：literature_manager → paper_reader → knowledge_organizer → outline_planner → survey_writer → finalize；产物落盘 `runs/<task_id>/`，`logs/stages.jsonl` 记录 latency/token/error。
-- Writer 引用机制：模型输出 `[[P001]]` 标记 → 代码按全文首现顺序重排为 `[1]/[2]` 并重建 References；无法绑定的 Claim 丢弃、未知编号记入 `unknown_citations`。
-- 单篇论文读取失败 → `status=unavailable` 继续跑；全部失败或 Organizer/Planner 无合法产物 → Stage 失败中止。
-- 下一步：Step 4 Citation Verifier（Claim → Citation → Paper → Evidence，输出 support/evidence/confidence）。
+- Step 1–5 全部完成并各自分多次 commit：Pipeline 为 7 个 Stage
+  （literature_manager → paper_reader → knowledge_organizer → outline_planner → survey_writer → citation_verifier → finalize）。
+- Step 4（Citation Verifier）：Verification/VerificationResult 数据模型（support ∈ {True/False/None}，summary 按 Claim 聚合）、
+  `citation_verifier.py` Agent（分批调用、单批失败降级 unverifiable、`_fill_unassessed` 补漏、去重）、
+  六段式 Prompt（v0.1.0）、`pipeline.enable_citation_verification` 开关；evidence_map 进入 result.json。
+- Step 5（Evaluation 契约）：`app/core/contract.py` 集中定义六字段最终输出 + `eval_payload.json`
+  机器可读合并结果 + `validate_result_payload` 结构校验（失败抛 ContractError）；evidence_map 中
+  `citation` → `paper_id` 对齐契约；`app/core/generator.py` 提供 `SurveyGenerator` ABC +
+  `HySurveyAgentGenerator`（architecture 第 12 节统一生成器接口）。
+- 动态测试基建：`/tmp/fake_hy3.py` 假 OpenAI 兼容服务端（端口 8765）按 Prompt 标识分发，支持故障注入；
+  用后删除。dispatch 取第一条 user 消息；解析 ID 需排除 Prompt 的 Schema 表格与 few-shot 示例。
+- 已修复 bug：Reader 曾信任模型回显 paper_id（few-shot P001 污染）；Verification.from_dict 曾不去重 (claim, citation)。
+- 测试 104 个全过（ruff/mypy/check_repo 干净）；动态测试覆盖 dry-run、正常端到端、单篇失败降级、契约输出。
+- 工程教训：pytest 经 `| tail` 会吞退出码，提交前检查要直接用 pytest 退出码；git add 清单需逐文件核对。
+- 下一步：Step 6 Benchmark Batch Runner。
 - 待办：`docs/Hy-SurveyAgent Application 开发文档.md` 与 `AGENTS.md` 有用户侧 markdown 格式化改动未提交，需用户确认后再处理。
