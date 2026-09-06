@@ -133,6 +133,26 @@ def test_run_batch_respects_limit(tmp_path, prompt_dir, sample_papers, scripted_
     assert summary["tasks"][0]["task_id"] == "task-0"
 
 
+def write_cli_config(tmp_path: Path, prompt_dir: Path) -> Path:
+    """CLI 走 load_config，用绝对路径把 runs/results 隔离到临时目录。"""
+    import yaml
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "paths": {
+                    "runs_dir": str(tmp_path / "runs"),
+                    "results_dir": str(tmp_path / "results"),
+                    "prompts_dir": str(prompt_dir),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return config_file
+
+
 def test_cli_runs_batch_and_reports_exit_code(
     tmp_path, prompt_dir, sample_papers, scripted_provider, monkeypatch, capsys
 ):
@@ -143,8 +163,7 @@ def test_cli_runs_batch_and_reports_exit_code(
         tmp_path,
         [{"task_id": "task-a", "topic": "Topic A", "papers": str(papers)}],
     )
-    config = AppConfig(root=tmp_path)
-    config.paths.prompts_dir = str(prompt_dir)
+    config_file = write_cli_config(tmp_path, prompt_dir)
 
     class FakeAdapter(ScriptedProvider):
         @classmethod
@@ -159,12 +178,14 @@ def test_cli_runs_batch_and_reports_exit_code(
 
     monkeypatch.setattr(cli, "Hy3Adapter", FakeAdapter)
 
-    exit_code = cli.main(["--manifest", str(manifest)])
+    exit_code = cli.main(["--manifest", str(manifest), "--config", str(config_file)])
 
     captured = capsys.readouterr().out
     assert exit_code == 0
     assert "task-a" in captured
     assert "成功 1，失败 0" in captured
+    # 运行产物隔离在临时目录，不污染项目根目录
+    assert (tmp_path / "results" / "benchmark").is_dir()
 
 
 def test_cli_returns_1_when_task_fails(
@@ -177,8 +198,7 @@ def test_cli_returns_1_when_task_fails(
         tmp_path,
         [{"task_id": "task-a", "topic": "Topic A", "papers": str(papers)}],
     )
-    config = AppConfig(root=tmp_path)
-    config.paths.prompts_dir = str(prompt_dir)
+    config_file = write_cli_config(tmp_path, prompt_dir)
 
     class FakeAdapter(ScriptedProvider):
         @classmethod
@@ -194,6 +214,6 @@ def test_cli_returns_1_when_task_fails(
 
     monkeypatch.setattr(cli, "Hy3Adapter", FakeAdapter)
 
-    exit_code = cli.main(["--manifest", str(manifest)])
+    exit_code = cli.main(["--manifest", str(manifest), "--config", str(config_file)])
 
     assert exit_code == 1
