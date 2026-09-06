@@ -20,6 +20,12 @@ from app.agents.paper_reader import PaperReader, ReaderConfig
 from app.agents.planner import OutlinePlanner
 from app.agents.writer import SurveyWriter, WriterConfig, WriterResult
 from app.config import AppConfig
+from app.core.contract import (
+    ContractError,
+    build_eval_payload,
+    build_result_payload,
+    validate_result_payload,
+)
 from app.core.types import (
     Outline,
     OutlineSection,
@@ -177,8 +183,13 @@ async def run_pipeline(
     with run.stage(STAGE_FINALIZE, "verification.json", "result.json"):
         state.final_survey = state.draft
         run.write_text("final.md", state.final_survey)
-        payload = build_result(task, state)
+        payload = build_result_payload(task, state)
+        # Step 5：最终输出必须通过契约校验，保证 Evaluation 接口稳定
+        violations = validate_result_payload(payload)
+        if violations:
+            raise ContractError("最终输出违反 Evaluation 接口契约：" + "；".join(violations))
         run.write_json("result.json", payload)
+        run.write_json("eval_payload.json", build_eval_payload(state))
 
     return payload
 
@@ -231,22 +242,4 @@ def _usage_delta(provider: LLMProvider, before: dict[str, int]) -> dict[str, int
 
 def build_result(task: TaskInput, state: SurveyState) -> dict[str, Any]:
     """构造对外的结构化结果（Evaluation 接口契约）。"""
-    return {
-        "task": {
-            "topic": task.topic,
-            "research_questions": list(task.research_questions),
-        },
-        "papers": [
-            {
-                "paper_id": paper.paper_id,
-                "title": paper.title,
-                "year": paper.year,
-                "source": paper.source,
-            }
-            for paper in state.papers
-        ],
-        "survey": state.final_survey,
-        "claims": [claim.to_dict() for claim in state.claims],
-        "citations": [citation.to_dict() for citation in state.citation_map],
-        "evidence_map": list(state.verification.get("results", [])),
-    }
+    return build_result_payload(task, state)

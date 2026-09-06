@@ -18,6 +18,7 @@ from app.agents.paper_reader import ReaderError
 from app.agents.planner import PlannerError
 from app.agents.writer import WriterError
 from app.config import ConfigError, load_config
+from app.core.contract import ContractError
 from app.core.meta import build_meta
 from app.core.pipeline import PROMPTS, run_pipeline
 from app.core.types import PaperSet, TaskInput
@@ -97,6 +98,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     except (
         ConfigError,
+        ContractError,
         LoaderError,
         ReaderError,
         OrganizerError,

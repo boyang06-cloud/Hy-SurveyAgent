@@ -120,8 +120,24 @@ def test_run_pipeline_writes_all_artifacts(tmp_path, prompt_dir, sample_papers, 
     assert verification["summary"]["unverifiable"] == 1  # C001 已核验，C002 由系统补齐
     assert verification["results"][0]["support"] is True
     assert verification["results"][0]["evidence"]
-    # Step 4 起 evidence_map 来自真实核验结果（Evaluation 接口）
-    assert payload["evidence_map"] == verification["results"]
+    # Step 5：evidence_map 来自真实核验结果，字段对齐 Evaluation 接口（citation → paper_id）
+    first = payload["evidence_map"][0]
+    assert set(first) == {"claim_id", "paper_id", "evidence", "support"}
+    assert first["claim_id"] == "C001"
+    assert first["paper_id"] == "P001"
+    assert first["support"] is True
+    # 机器可读合并结果与最终输出同源
+    eval_payload = read_json(run.path("eval_payload.json"))
+    assert set(eval_payload) == {
+        "survey_markdown",
+        "citations",
+        "source_papers",
+        "outline",
+        "claims",
+        "verification",
+    }
+    assert eval_payload["survey_markdown"] == payload["survey"]
+    assert [p["paper_id"] for p in eval_payload["source_papers"]] == ["P001", "P002"]
 
 
 def test_run_pipeline_logs_every_stage_with_usage(
