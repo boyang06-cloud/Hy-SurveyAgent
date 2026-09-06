@@ -43,6 +43,15 @@ def test_parse_extracts_structure(prompt_dir: Path, sample_papers: PaperSet) -> 
     assert "Table 2" in analysis.claims[0].evidence
 
 
+def test_parse_forces_input_paper_id(prompt_dir: Path, sample_papers: PaperSet) -> None:
+    """模型回显 few-shot 示例中的 paper_id 时，必须以输入论文为准。"""
+    reader = make_reader(prompt_dir, object())
+    payload = {**SAMPLE_ANALYSIS_PAYLOAD, "paper_id": "P001"}
+    analysis = reader.parse(payload, sample_papers.papers[1])
+    assert analysis.paper_id == "P002"
+    assert all(claim.claim_id.startswith("P002-C") for claim in analysis.claims)
+
+
 def test_parse_renumbers_claims(prompt_dir: Path, sample_papers: PaperSet) -> None:
     reader = make_reader(prompt_dir, object())
     payload = {

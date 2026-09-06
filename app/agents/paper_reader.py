@@ -65,8 +65,14 @@ class PaperReader:
         ]
 
     def parse(self, payload: dict[str, Any], paper: Paper) -> PaperAnalysis:
-        """校验模型输出；核心字段全空视为读取失败。"""
-        analysis = PaperAnalysis.from_dict(payload, paper_id=paper.paper_id)
+        """校验模型输出；核心字段全空视为读取失败。
+
+        `paper_id` 以输入论文为准（Prompt 已声明由系统回填），
+        防止模型回显 Prompt 中 few-shot 示例的 ID 污染下游 Stage；
+        Claim ID（`P00x-Cn`）随输入 paper_id 一并重编。
+        """
+        clean_payload = {key: value for key, value in payload.items() if key != "paper_id"}
+        analysis = PaperAnalysis.from_dict(clean_payload, paper_id=paper.paper_id)
         if not (analysis.problem or analysis.method or analysis.key_idea or analysis.claims):
             return PaperAnalysis.unavailable(paper.paper_id, "模型未抽取到任何有效信息")
         return analysis
