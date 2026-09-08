@@ -28,5 +28,5 @@
 - 已修复 bug：Reader 曾信任模型回显 paper_id（few-shot P001 污染）；Verification.from_dict 曾不去重 (claim, citation)。
 - 测试 116 个全过（ruff/mypy/check_repo 干净）。
 - 工程教训：pytest 经 `| tail` 会吞退出码；git add 清单逐文件核对；CLI 测试注意 load_config 的 root。
+- 已知偏差：Task Analyzer 阶段未实现（MVP 以 TaskInput 直通，`SurveyState.task_spec` 为占位），属 V1 范围。
 - 后续方向：Evaluation 打分与 benchmark 数据底座属 evaluator 侧；Baseline 实现（SimplePromptGenerator 等）。
-- 待办：`docs/Hy-SurveyAgent Application 开发文档.md` 与 `AGENTS.md` 有用户侧 markdown 格式化改动未提交，需用户确认后再处理。
