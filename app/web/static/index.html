@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f9fb">
+  <title>Hy-SurveyAgent · 研究工作台</title>
+  <link rel="icon" href="/static/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script type="module" src="/static/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">跳转到主要内容</a>
+  <aside class="sidebar">
+    <a class="brand" href="#new" aria-label="Hy-SurveyAgent 首页"><img src="/static/mark.svg" width="36" height="36" alt=""><span>Hy-SurveyAgent<small>RESEARCH WORKSPACE</small></span></a>
+    <a class="button primary new-button" href="#new"><span data-icon="plus"></span>新建 Survey</a>
+    <p class="nav-caption">工作空间</p>
+    <nav aria-label="主导航">
+      <a href="#new" data-nav="new"><span data-icon="grid"></span>研究工作台</a>
+      <a href="#history" data-nav="history"><span data-icon="clock"></span>任务历史<span class="count" id="run-count">0</span></a>
+    </nav>
+    <div class="recent-heading"><p class="nav-caption">最近研究</p><span class="small muted">最近 5 项</span></div>
+    <div id="recent-runs" class="recent-runs"><p class="small muted">正在读取任务…</p></div>
+    <div class="sidebar-bottom">
+      <div class="local-note"><span data-icon="shield"></span><div><strong>证据驱动的学术写作</strong><p>从文献出发，让每个引用有迹可循。</p></div></div>
+      <nav aria-label="辅助导航"><a href="#settings" data-nav="settings"><span data-icon="settings"></span>运行设置与帮助</a></nav>
+      <div class="workspace-user"><span class="avatar">HY</span><div>本地工作空间<small>Hy3 · Survey Agent</small></div><span class="local-dot" aria-hidden="true"></span></div>
+    </div>
+  </aside>
+  <div class="shell">
+    <header class="topbar"><div class="breadcrumb"><span data-icon="book"></span><span>工作空间</span><span class="slash">/</span><strong id="page-label">研究工作台</strong></div><a id="connection" class="connection" href="#settings">正在连接…</a></header>
+    <main id="main" tabindex="-1"></main>
+    <footer><span>Hy-SurveyAgent</span><span>理解文献 · 组织知识 · 验证引用</span><span>本地研究工作台 / v0.1</span></footer>
+  </div>
+  <div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
+</body>
+</html>
