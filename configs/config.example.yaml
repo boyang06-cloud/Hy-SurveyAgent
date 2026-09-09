@@ -9,7 +9,7 @@
 #   运行时参数会被记录到 runs/<task_id>/meta.json，用于结果复现。
 
 model:
-  name: hy3-default          # 模型标识，具体可选值以 Hy3 官方控制台为准
+  name: hy3          # 模型标识，具体可选值以 Hy3 官方控制台为准
   temperature: 0.2           # Survey 生成偏好稳定输出，建议 ≤ 0.3
   max_tokens: 8192
   top_p: 1.0
