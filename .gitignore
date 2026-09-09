@@ -226,3 +226,6 @@ configs/config.yaml
 runs/
 results/
 experiments/outputs/
+
+# 外部设计工具下载的 skill 包（仅本地使用，不入库）
+.agents/
