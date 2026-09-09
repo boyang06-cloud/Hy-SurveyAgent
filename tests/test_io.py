@@ -8,14 +8,8 @@ from pathlib import Path
 import pytest
 
 from app.config import AppConfig
-from app.core.types import PaperSet
 from app.io.exporter import RunWriter
-from app.io.loader import (
-    LoaderError,
-    load_papers,
-    load_task_input,
-    render_papers_context,
-)
+from app.io.loader import LoaderError, load_papers, load_task_input
 from app.prompts.loader import PromptError, PromptLoader
 
 
@@ -97,17 +91,6 @@ def test_load_task_input(tmp_path: Path) -> None:
     assert task.time_range == {"start": 2020, "end": 2026}
 
 
-def test_render_papers_context_truncates(tmp_path: Path, sample_papers: PaperSet) -> None:
-    context = render_papers_context(sample_papers, max_chars_per_paper=20)
-    assert "[P001]" in context
-    assert "truncated" in context
-
-
-def test_render_papers_context_limits_papers(sample_papers: PaperSet) -> None:
-    context = render_papers_context(sample_papers, max_papers=1)
-    assert "[P002]" not in context
-
-
 def test_prompt_loader_renders_and_reports_missing(tmp_path: Path) -> None:
     target = tmp_path / "demo.md"
     target.write_text("> version: 1.2.3\nTopic: {{ topic }}\n", encoding="utf-8")
@@ -144,9 +127,7 @@ def test_run_writer_logs_error_and_reraises(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError):
         with run.stage("boom", "in", "out"):
             raise RuntimeError("stage failed")
-    record = json.loads(
-        (run.run_dir / "logs" / "stages.jsonl").read_text(encoding="utf-8").strip()
-    )
+    record = json.loads((run.run_dir / "logs" / "stages.jsonl").read_text(encoding="utf-8").strip())
     assert record["error"] == "RuntimeError: stage failed"
 
 

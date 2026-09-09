@@ -3,7 +3,8 @@
 基于 **Hy3** 的学术 Survey 生成 Agent Application：输入一个研究主题与一组论文，自动完成
 「主题理解 → 文献组织 → 论文阅读 → Survey 规划 → Survey 生成 → 引用核验」，输出结构化、引用可追溯的 Survey。
 
-项目当前进度：**Step 1**（Hy3 Adapter + Paper Loader + Simple Writer），已跑通 `Topic + Papers → Survey`。
+项目当前进度：**Step 3**（Literature Manager + Paper Reader + Knowledge Organizer + Outline
+Planner + Outline-driven Writer），已跑通完整的多阶段 Agent Workflow。
 后续阶段见 `AGENTS.md` 第 14 节开发路线。
 
 ## Pipeline
@@ -11,17 +12,17 @@
 ```text
 Research Topic + Source Papers
         ↓
-  Task Analyzer            （Step 2+）
+  Task Analyzer            （后续 Step）
         ↓
-  Literature Manager       （Step 2+）
+  Literature Manager       ← Step 2 已实现（Benchmark 固定集检索，不联网）
         ↓
-  Paper Reader（并行）      （Step 2+）
+  Paper Reader（并行）      ← Step 2 已实现
         ↓
-  Knowledge Organizer      （Step 3）
+  Knowledge Organizer      ← Step 3 已实现
         ↓
-  Outline Planner          （Step 3）
+  Outline Planner          ← Step 3 已实现
         ↓
-  Survey Writer            ← Step 1 已实现（Simple Writer）
+  Survey Writer            ← Step 3 已实现（按 Outline 分节并行写作）
         ↓
   Citation Verifier        （Step 4）
         ↓
@@ -90,6 +91,10 @@ runs/<run_id>/
 ├── meta.json          # run_id、topic、git commit、python 版本、prompt 版本与 hash、运行参数
 ├── task.json          # 任务输入
 ├── papers.json        # 归一化后的 Source Papers
+├── analyses.json      # 每篇论文的结构化分析（Paper Reader，失败论文标记 unavailable）
+├── knowledge.json     # 跨论文知识结构（Knowledge Organizer）
+├── outline.json       # Survey 章节规划（Outline Planner）
+├── prompts/           # dry-run 或各 Section 的渲染后 Prompt
 ├── claims.json        # Claim 列表与引用映射
 ├── verification.json  # Step 4 之前为空结构
 ├── draft.md / final.md
@@ -138,3 +143,17 @@ app/
 ```
 
 详细工程约定见 [`AGENTS.md`](AGENTS.md)，设计文档见 [`docs/`](docs)。
+
+## Web 研究工作台
+
+通过浏览器创建 Survey、查看阶段进度、阅读正文并追溯引用证据：
+
+```bash
+uv sync
+uv run python -m app.web
+```
+
+打开 http://127.0.0.1:8000 。无需 Node 构建环境；使用现有模型配置。
+也可选择「试用合成示例文献 → 离线检查」，不调用模型。
+
+使用方式、上传格式和接口说明见 [Web 工作台](docs/Web%20工作台.md)。

@@ -628,15 +628,13 @@ app/model/hy3_adapter.py
 
 ```python
 class LLMProvider:
-
     def generate(
         self,
         messages,
         model,
         temperature,
         max_tokens,
-    ):
-        ...
+    ): ...
 ```
 
 各 Agent 只调用：
@@ -754,7 +752,6 @@ Outline Planner：
 
 ```python
 class SurveyState:
-
     task_spec
     papers
     paper_analyses
@@ -878,21 +875,11 @@ knowledge = organize(analyses)
 
 outline = plan_outline(task, knowledge)
 
-draft = write_survey(
-    task,
-    knowledge,
-    outline
-)
+draft = write_survey(task, knowledge, outline)
 
-verification = verify_citations(
-    draft,
-    papers
-)
+verification = verify_citations(draft, papers)
 
-result = finalize(
-    draft,
-    verification
-)
+result = finalize(draft, verification)
 ```
 
 ---
@@ -1145,13 +1132,11 @@ Evaluation Score
 
 ```python
 class SurveyGenerator:
-
     def generate(
         self,
         topic,
         papers,
-    ):
-        ...
+    ): ...
 ```
 
 实现：

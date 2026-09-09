@@ -221,8 +221,12 @@ __marimo__/
 # 密钥与本地配置：仓库只提交 .example 模板
 API_key.conf
 configs/config.yaml
+configs/eval.yaml
 
 # 运行产物与实验结果
 runs/
 results/
 experiments/outputs/
+
+# 外部设计工具下载的 skill 包（仅本地使用，不入库）
+.agents/

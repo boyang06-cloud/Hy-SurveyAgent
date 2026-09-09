@@ -1,0 +1,29 @@
+{
+  "topic": "3D Gaussian Splatting",
+  "units": [
+    {
+      "id": "3dgs_definition",
+      "name": "3DGS definition and motivation",
+      "description": "Explain what 3D Gaussian Splatting is and the problem it addresses.",
+      "importance": 2,
+      "source_papers": ["2308.04079"],
+      "generated_by": {
+        "model": "...",
+        "prompt_version": "rubric-v1",
+        "timestamp": "2026-09-09T12:00:00Z"
+      }
+    },
+    {
+      "id": "gaussian_representation",
+      "name": "Gaussian scene representation",
+      "description": "Explain position, covariance, opacity and appearance representation.",
+      "importance": 2,
+      "source_papers": ["2308.04079"],
+      "generated_by": {
+        "model": "...",
+        "prompt_version": "rubric-v1",
+        "timestamp": "2026-09-09T12:00:00Z"
+      }
+    }
+  ]
+}

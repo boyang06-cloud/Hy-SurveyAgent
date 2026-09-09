@@ -13,16 +13,22 @@ import sys
 from collections.abc import Sequence
 from typing import Any
 
+from app.agents.organizer import OrganizerError
+from app.agents.paper_reader import ReaderError
+from app.agents.planner import PlannerError
 from app.agents.writer import WriterError
 from app.config import ConfigError, load_config
+from app.core.contract import ContractError
 from app.core.meta import build_meta
-from app.core.pipeline import WRITER_PROMPT, run_step1
+from app.core.pipeline import PROMPTS, run_pipeline
 from app.core.types import PaperSet, TaskInput
 from app.io.exporter import RunWriter
-from app.io.loader import LoaderError, load_papers, load_task_input
+from app.io.loader import LoaderError, load_task_input
 from app.model.hy3_adapter import Hy3Adapter
 from app.model.provider import LLMError
 from app.prompts.loader import PromptError, PromptLoader
+from app.retrieval.benchmark_loader import build_benchmark_retriever
+from app.retrieval.retriever import RetrieverError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,9 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--task-file", help="任务文件（YAML / JSON），可带 research_questions 等字段"
     )
     parser.add_argument("--papers", required=True, help="论文集文件（JSON / JSONL / YAML）")
-    parser.add_argument(
-        "--config", help="运行配置路径，默认 configs/config.yaml"
-    )
+    parser.add_argument("--config", help="运行配置路径，默认 configs/config.yaml")
     parser.add_argument("--run-id", help="指定运行 ID，默认按日期自增")
     parser.add_argument("--limit", type=int, help="只取前 N 篇论文（调试用）")
     parser.add_argument("--dry-run", action="store_true", help="不调用模型，仅渲染并落盘 Prompt")
@@ -59,9 +63,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not task.topic:
             raise LoaderError("研究主题为空，请提供 --topic 或在任务文件中填写 topic。")
 
-        papers = load_papers(args.papers, limit=args.limit)
+        # Benchmark 模式：固定 Source Paper Set，运行期不联网检索
+        retriever = build_benchmark_retriever(args.papers, limit=args.limit)
+        papers = retriever.retrieve(task)
         if not papers.papers:
-            raise LoaderError(f"论文集合为空：{args.papers}")
+            raise LoaderError(f"论文集合为空或全部被过滤：{args.papers}")
 
         run = RunWriter.create(config.root, config.paths.runs_dir, args.run_id, topic=task.topic)
         prompts = PromptLoader(config.prompts_dir())
@@ -72,7 +78,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 task.topic,
                 extra={
                     "config": config.describe(),
-                    "prompts": prompts.describe([WRITER_PROMPT]),
+                    "prompts": prompts.describe(list(PROMPTS)),
                     "input": {"papers": str(args.papers), "limit": args.limit},
                 },
             )
@@ -81,16 +87,28 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.dry_run:
             payload: dict[str, Any] = asyncio.run(
-                run_step1(None, task, papers, run, config=config, dry_run=True)
+                run_pipeline(None, task, papers, run, config=config, dry_run=True)
             )
         else:
             with Hy3Adapter.from_config(config) as llm:
-                payload = asyncio.run(run_step1(llm, task, papers, run, config=config))
+                payload = asyncio.run(run_pipeline(llm, task, papers, run, config=config))
 
         _print_summary(run, papers, payload, dry_run=args.dry_run)
         return 0
 
-    except (ConfigError, LoaderError, WriterError, LLMError, PromptError, OSError) as exc:
+    except (
+        ConfigError,
+        ContractError,
+        LoaderError,
+        ReaderError,
+        OrganizerError,
+        PlannerError,
+        RetrieverError,
+        WriterError,
+        LLMError,
+        PromptError,
+        OSError,
+    ) as exc:
         print(f"[ERROR] {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
 
@@ -100,7 +118,10 @@ def _print_summary(
 ) -> None:
     print(f"run_id        : {run.task_id}")
     print(f"run_dir       : {run.run_dir}")
-    print(f"papers        : {len(papers.papers)}（去重移除 {papers.duplicates_removed} 篇）")
+    print(
+        f"papers        : {len(papers.papers)}"
+        f"（去重移除 {papers.duplicates_removed} 篇，过滤 {papers.filtered_out} 篇）"
+    )
     print(f"claims        : {len(payload.get('claims', []))}")
     print(f"citations     : {len(payload.get('citations', []))}")
     print(f"survey_chars  : {len(payload.get('survey', ''))}")

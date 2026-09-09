@@ -1,0 +1,22 @@
+{
+  "id": "3d_gaussian_splatting",
+  "topic": "3D Gaussian Splatting",
+  "query": "Write a comprehensive academic survey on 3D Gaussian Splatting.",
+  "domain": ["computer_vision", "3d_vision"],
+  "source": {
+    "dataset": "InternScience/SurveyBench",
+    "benchmark_file": "3D Gaussian Splatting_bench.json",
+    "human_reference_file": "A Survey on 3D Gaussian Splatting.json"
+  },
+  "benchmark_pool": ["2308.04079", "2310.08528"],
+  "human_reference_set": ["2308.04079"],
+  "gold_papers": ["2308.04079", "2310.08528"],
+  "background_papers": [],
+  "key_information_units": ["3dgs_definition", "gaussian_representation"],
+  "quiz_file": "../quizzes/3d_gaussian_splatting.json",
+  "rubric_file": "../rubrics/3d_gaussian_splatting.json",
+  "human_reference": {
+    "available": true,
+    "path": "human_surveys/3d_gaussian_splatting.md"
+  }
+}

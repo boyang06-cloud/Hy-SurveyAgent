@@ -58,8 +58,7 @@ class PromptLoader:
     def describe(self, names: list[str]) -> dict[str, dict[str, str]]:
         """返回各 Prompt 的版本与 hash，写入 meta.json 用于结果复现。"""
         return {
-            name: {"version": self.version(name), "sha256": self.digest(name)}
-            for name in names
+            name: {"version": self.version(name), "sha256": self.digest(name)} for name in names
         }
 
 

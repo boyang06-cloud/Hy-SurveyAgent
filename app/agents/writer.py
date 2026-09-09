@@ -1,24 +1,37 @@
-"""Survey Writer（Step 1：Simple Writer）。
+"""Survey Writer（Step 3）：按 Outline 分节撰写 Survey。
 
-职责：`Topic + Source Papers → Survey 草稿 + Claims + Citations`。
-约束：只能使用输入论文集中的论文，禁止编造引用；引用编号由代码统一重排，保证可追溯。
+设计要点：
+    1. 每个 Section 只注入其规划覆盖的论文证据（最小必要 Context），并支持并行生成。
+    2. 正文用 `[[P001]]` 论文标记引用，由代码统一转换为 `[1]`/`[2]` 编号并生成
+       References，保证跨 Section 编号全局一致、可追溯。
+    3. 只能使用输入论文集中的论文，禁止编造引用；无法绑定论文的 Claim 直接丢弃。
 """
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import ModelConfig
-from app.core.types import Citation, Claim, PaperSet, TaskInput, WriterOutput
-from app.io.loader import render_papers_context
-from app.model.provider import LLMProvider, LLMResponse, Message
+from app.core.types import (
+    Citation,
+    Claim,
+    Outline,
+    OutlineSection,
+    PaperAnalysis,
+    PaperSet,
+    TaskInput,
+    WriterOutput,
+)
+from app.io.render import MAX_ANALYSIS_CHARS, render_section_evidence
+from app.model.provider import LLMProvider, Message
 from app.prompts.loader import PromptLoader
 
-CITATION_TOKEN_PATTERN = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
+CITATION_MARKER_PATTERN = re.compile(r"\[\[([A-Za-z0-9_\-]+)\]\]")
+ADJACENT_CITATION_PATTERN = re.compile(r"\[(\d+)\]\[(\d+)\]")
 REFERENCES_PATTERN = re.compile(r"^#{1,6}\s*References\s*$", re.IGNORECASE | re.MULTILINE)
-CITATION_ID_PATTERN = re.compile(r"\d+")
 
 SYSTEM_INSTRUCTION = (
     "你是严格遵守结构化输出约束的助手。"
@@ -35,21 +48,30 @@ class WriterConfig:
     """Writer 运行参数。"""
 
     prompt_name: str = "writer"
-    max_papers: int | None = None
-    max_chars_per_paper: int = 6000
+    max_papers_per_section: int = 8
+    max_chars_per_paper: int = MAX_ANALYSIS_CHARS
+    max_concurrency: int = 8
+
+
+@dataclass
+class SectionDraft:
+    """单个 Section 的生成结果（正文仍使用 [[Pxxx]] 论文标记）。"""
+
+    section: OutlineSection
+    content: str
+    claims: list[Claim] = field(default_factory=list)
 
 
 @dataclass
 class WriterResult:
-    """Writer 产物与调用上下文，供 Pipeline 记录 token_usage 与落盘 Prompt。"""
+    """Writer 产物与调用上下文，供 Pipeline 落盘 Prompt 与统计 token。"""
 
     output: WriterOutput
-    messages: list[Message] = field(default_factory=list)
-    response: LLMResponse | None = None
+    section_messages: list[list[Message]] = field(default_factory=list)
 
 
-class SimpleSurveyWriter:
-    """Step 1 的 Writer：直接基于论文上下文生成 Survey（Step 3 起改为按 Outline 分节写作）。"""
+class SurveyWriter:
+    """按 Outline 逐节生成，再统一重排引用编号并生成 References。"""
 
     def __init__(
         self,
@@ -63,59 +85,76 @@ class SimpleSurveyWriter:
         self.model = model
         self.config = config or WriterConfig()
 
-    def build_messages(self, task: TaskInput, papers: PaperSet) -> list[Message]:
-        context = render_papers_context(
-            papers,
-            max_papers=self.config.max_papers,
-            max_chars_per_paper=self.config.max_chars_per_paper,
-        )
+    def build_section_messages(
+        self,
+        task: TaskInput,
+        section: OutlineSection,
+        analyses: list[PaperAnalysis],
+        papers: PaperSet,
+    ) -> list[Message]:
+        """只注入该 Section 规划覆盖的论文证据。"""
         rendered = self.prompts.render(
             self.config.prompt_name,
             topic=task.topic,
-            research_questions=task.research_questions,
-            paper_count=len(papers),
-            papers_context=context,
+            section_title=section.title,
+            section_purpose=section.purpose,
+            section_papers=[f"[{pid}]" for pid in section.papers],
+            section_key_claims=section.key_claims,
+            evidence_context=render_section_evidence(
+                section,
+                analyses,
+                papers,
+                max_papers=self.config.max_papers_per_section,
+                max_chars=self.config.max_chars_per_paper,
+            ),
         )
         return [
             {"role": "system", "content": SYSTEM_INSTRUCTION},
             {"role": "user", "content": rendered},
         ]
 
-    def write(self, task: TaskInput, papers: PaperSet) -> WriterResult:
-        if not papers.papers:
-            raise WriterError("论文集为空，无法撰写 Survey。")
-        messages = self.build_messages(task, papers)
-        payload = self.llm.generate_json(
+    async def write(
+        self,
+        task: TaskInput,
+        outline: Outline,
+        analyses: list[PaperAnalysis],
+        papers: PaperSet,
+    ) -> WriterResult:
+        """并行生成各 Section，再统一编号组装成完整 Survey。"""
+        if not outline.sections:
+            raise WriterError("Outline 为空，无法撰写 Survey。")
+        if not any(analysis.available for analysis in analyses):
+            raise WriterError("没有可用的论文分析结果，无法撰写 Survey。")
+
+        semaphore = asyncio.Semaphore(max(1, self.config.max_concurrency))
+
+        async def _write_section(section: OutlineSection) -> tuple[SectionDraft, list[Message]]:
+            messages = self.build_section_messages(task, section, analyses, papers)
+            async with semaphore:
+                payload = await asyncio.to_thread(self._generate, messages)
+            return self.parse_section(payload, section, papers.ids()), messages
+
+        results = await asyncio.gather(*(_write_section(section) for section in outline.sections))
+        drafts = [draft for draft, _ in results]
+        messages = [section_messages for _, section_messages in results]
+        return WriterResult(output=self.assemble(drafts, papers), section_messages=messages)
+
+    def _generate(self, messages: list[Message]) -> dict[str, Any]:
+        return self.llm.generate_json(
             messages,
             self.model.name,
             self.model.temperature,
             self.model.max_tokens,
             top_p=self.model.top_p,
         )
-        output = self.parse(payload, papers)
-        return WriterResult(output=output, messages=messages, response=self.llm.last_response)
 
-    def parse(self, payload: dict[str, Any], papers: PaperSet) -> WriterOutput:
-        """把模型输出校验为 WriterOutput：过滤伪引用、重排编号、重建 References。"""
-        markdown = payload.get("survey_markdown") or payload.get("survey") or ""
-        if not isinstance(markdown, str):
-            raise WriterError("survey_markdown 应为字符串。")
-
-        known_ids = papers.ids()
-        number_to_paper = _citation_index(payload.get("citations"), known_ids)
-
-        renumbered, ordered, unknown = _renumber(markdown, number_to_paper)
-        citations: list[Citation] = []
-        for number, paper_id in ordered.items():
-            paper = papers.get(paper_id)
-            citations.append(
-                Citation(
-                    citation_id=f"[{number}]",
-                    paper_id=paper_id,
-                    title=paper.title if paper else "",
-                    source=paper.source if paper else "",
-                )
-            )
+    def parse_section(
+        self, payload: dict[str, Any], section: OutlineSection, known_ids: set[str]
+    ) -> SectionDraft:
+        """校验单个 Section 的输出；正文为空或 Claim 无法绑定论文时按规则处理。"""
+        content = payload.get("content") or payload.get("section_markdown") or ""
+        if not isinstance(content, str) or not content.strip():
+            raise WriterError(f"Section `{section.title}` 的正文为空。")
 
         claims: list[Claim] = []
         for item in _dict_list(payload.get("claims")):
@@ -124,74 +163,82 @@ class SimpleSurveyWriter:
                 continue
             refs = [pid for pid in _str_list(item.get("citations")) if pid in known_ids]
             if not refs:
-                continue  # 无法绑定到真实论文的论断直接丢弃，避免无依据的 Claim
+                continue
             claims.append(Claim(claim_id=f"C{len(claims) + 1:03d}", text=text, citations=refs))
 
+        return SectionDraft(section=section, content=_strip_references(content), claims=claims)
+
+    def assemble(self, drafts: list[SectionDraft], papers: PaperSet) -> WriterOutput:
+        """合并各 Section：统一引用编号、汇总 Claims、生成 References。"""
+        body = "\n\n".join(
+            f"## {draft.section.title}\n\n{draft.content.strip()}" for draft in drafts
+        )
+
+        known_ids = papers.ids()
+        ordered: dict[str, int] = {}
+        unknown: list[str] = []
+
+        def replace(match: re.Match[str]) -> str:
+            marker = match.group(1)
+            if marker not in known_ids:
+                if marker not in unknown:
+                    unknown.append(marker)
+                return match.group(0)
+            if marker not in ordered:
+                ordered[marker] = len(ordered) + 1
+            return f"[{ordered[marker]}]"
+
+        body = CITATION_MARKER_PATTERN.sub(replace, body)
+        body = _merge_adjacent_citations(body)
+
+        citations: list[Citation] = []
+        for marker, number in sorted(ordered.items(), key=lambda item: item[1]):
+            paper = papers.get(marker)
+            citations.append(
+                Citation(
+                    citation_id=f"[{number}]",
+                    paper_id=marker,
+                    title=paper.title if paper else "",
+                    source=paper.source if paper else "",
+                )
+            )
+
+        claims: list[Claim] = []
+        for draft in drafts:
+            for claim in draft.claims:
+                claims.append(
+                    Claim(
+                        claim_id=f"C{len(claims) + 1:03d}",
+                        text=claim.text,
+                        citations=claim.citations,
+                    )
+                )
+
         return WriterOutput(
-            survey_markdown=_replace_references(renumbered, citations, papers),
+            survey_markdown=_replace_references(body, citations, papers),
             claims=claims,
             citations=citations,
-            unknown_citations=[f"[{number}]" for number in unknown],
+            unknown_citations=[f"[[{marker}]]" for marker in unknown],
         )
 
 
-def _citation_index(raw: Any, known_ids: set[str]) -> dict[int, str]:
-    """构建 `引用编号 → paper_id`，只保留真实存在的论文。"""
-    index: dict[int, str] = {}
-    for item in _dict_list(raw):
-        paper_id = str(item.get("paper_id") or "").strip()
-        if paper_id not in known_ids:
-            continue
-        match = CITATION_ID_PATTERN.search(str(item.get("citation_id") or ""))
-        if not match:
-            continue
-        number = int(match.group(0))
-        if number in index:
-            continue  # 同一编号只认第一篇，禁止一篇论文占用多个编号
-        index[number] = paper_id
-    return index
+def _merge_adjacent_citations(markdown: str) -> str:
+    """把相邻的 `[1][2]` 合并成 `[1, 2]`。"""
+    previous = None
+    while previous != markdown:
+        previous = markdown
+        markdown = ADJACENT_CITATION_PATTERN.sub(r"[\1, \2]", markdown)
+    return markdown
 
 
-def _renumber(
-    markdown: str, number_to_paper: dict[int, str]
-) -> tuple[str, dict[int, str], list[int]]:
-    """按正文首次出现顺序重排引用编号。
-
-    返回（新正文, {新编号: paper_id}, 未知编号列表）。未知编号原样保留，
-    避免误删正文中形如 `[2020]` 的非引用文本，同时暴露给后续核验。
-    """
-    new_by_old: dict[int, int] = {}
-    unknown: list[int] = []
-    counter = 1
-
-    def replace(match: re.Match[str]) -> str:
-        nonlocal counter
-        numbers: list[int] = []
-        for token in match.group(1).split(","):
-            token = token.strip()
-            if not token.isdigit():
-                return match.group(0)
-            old = int(token)
-            if old not in number_to_paper:
-                if old not in unknown:
-                    unknown.append(old)
-                return match.group(0)
-            if old not in new_by_old:
-                new_by_old[old] = counter
-                counter += 1
-            numbers.append(new_by_old[old])
-        return "[" + ", ".join(str(number) for number in numbers) + "]"
-
-    text = CITATION_TOKEN_PATTERN.sub(replace, markdown)
-    ordered = {
-        new: number_to_paper[old]
-        for old, new in sorted(new_by_old.items(), key=lambda item: item[1])
-    }
-    return text, ordered, unknown
+def _strip_references(content: str) -> str:
+    """移除 Section 内自行输出的 References（统一由系统生成）。"""
+    match = REFERENCES_PATTERN.search(content)
+    return content[: match.start()].rstrip() if match else content.rstrip()
 
 
 def _replace_references(markdown: str, citations: list[Citation], papers: PaperSet) -> str:
-    """用规范化后的引用表重建 References 章节，保证编号与论文一一对应。"""
+    """用规范化后的引用表重建 References 章节。"""
     lines = ["## References", ""]
     for citation in citations:
         paper = papers.get(citation.paper_id)
@@ -199,10 +246,6 @@ def _replace_references(markdown: str, citations: list[Citation], papers: PaperS
         suffix = f" {citation.source}" if citation.source else ""
         lines.append(f"{citation.citation_id} {label}.{suffix}")
     block = "\n".join(lines).rstrip() + "\n"
-
-    match = REFERENCES_PATTERN.search(markdown)
-    if match:
-        return markdown[: match.start()].rstrip() + "\n\n" + block
     return markdown.rstrip() + "\n\n" + block
 
 

@@ -1,0 +1,33 @@
+{
+  "topic": "3D Gaussian Splatting",
+  "questions": [
+    {
+      "id": "3dgs_q001",
+      "type": "concept",
+      "difficulty": "easy",
+      "question": "How does 3D Gaussian Splatting represent a scene?",
+      "reference_answer": "...",
+      "source_papers": ["2308.04079"],
+      "evidence": [{ "paper_id": "2308.04079", "section_id": "sec_3" }],
+      "generated_by": {
+        "model": "...",
+        "prompt_version": "quiz-v1",
+        "timestamp": "2026-09-09T12:00:00Z"
+      }
+    },
+    {
+      "id": "3dgs_q002",
+      "type": "method_comparison",
+      "difficulty": "medium",
+      "question": "How does 3DGS differ from NeRF in scene representation and rendering?",
+      "reference_answer": "...",
+      "source_papers": ["2308.04079"],
+      "evidence": [{ "paper_id": "2308.04079", "section_id": "sec_4" }],
+      "generated_by": {
+        "model": "...",
+        "prompt_version": "quiz-v1",
+        "timestamp": "2026-09-09T12:00:00Z"
+      }
+    }
+  ]
+}

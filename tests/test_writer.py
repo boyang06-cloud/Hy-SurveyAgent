@@ -1,157 +1,95 @@
-"""Survey Writer 的单元测试：Prompt 渲染、结构化输出解析、引用编号重排与伪引用过滤。"""
+"""Survey Writer（Step 3）的单元测试：分节生成与整体编号。"""
 
-from __future__ import annotations
-
-from pathlib import Path
+import asyncio
 
 import pytest
 
-from app.agents.writer import SimpleSurveyWriter, WriterError
+from app.agents.writer import SurveyWriter, WriterConfig, WriterError
 from app.config import ModelConfig
-from app.core.types import PaperSet, TaskInput
+from app.core.types import Outline, PaperAnalysis, TaskInput
 from app.prompts.loader import PromptLoader
 
+PAYLOAD_P001 = {
+    "content": "Vision-language models support driving [[P001]].",
+    "claims": [{"text": "VLMs support driving", "citations": ["P001"]}],
+}
+PAYLOAD_P002 = {
+    "content": "Methods fall into families [[P002]].",
+    "claims": [{"text": "Methods fall into families", "citations": ["P002"]}],
+}
 
-def make_writer(prompt_dir: Path, llm: object) -> SimpleSurveyWriter:
-    return SimpleSurveyWriter(llm, PromptLoader(prompt_dir), ModelConfig())  # type: ignore[arg-type]
+
+def make_writer(prompt_dir, llm, **kwargs):
+    return SurveyWriter(llm, PromptLoader(prompt_dir), ModelConfig(), WriterConfig(**kwargs))
 
 
-def test_build_messages_renders_topic_and_papers(prompt_dir: Path, sample_papers: PaperSet) -> None:
+def run_writer(writer, task, outline, analyses, papers):
+    return asyncio.run(writer.write(task, outline, analyses, papers))
+
+
+def test_build_section_messages_scopes_evidence(
+    prompt_dir, sample_papers, sample_analyses, sample_outline
+):
     writer = make_writer(prompt_dir, object())
-    messages = writer.build_messages(TaskInput(topic="Unit Topic"), sample_papers)
-    assert messages[0]["role"] == "system"
-    content = messages[-1]["content"]
+    section = sample_outline.sections[0]
+    content = writer.build_section_messages(
+        TaskInput(topic="Unit Topic"), section, sample_analyses, sample_papers
+    )[-1]["content"]
     assert "Unit Topic" in content
-    assert "[P001]" in content
+    assert "Introduction" in content
+    assert "Motivate language-grounded driving" in content
+    assert "P001-C1" in content
+    assert "P002" not in content
     assert "{{" not in content
 
 
-def test_write_parses_model_output(
-    prompt_dir: Path, sample_papers: PaperSet, scripted_provider
-) -> None:
-    llm = scripted_provider(
-        [
-            {
-                "survey_markdown": "## Introduction\nVLMs support driving [1].",
-                "claims": [{"text": "VLMs support driving", "citations": ["P001"]}],
-                "citations": [{"citation_id": "[1]", "paper_id": "P001"}],
-            }
-        ]
+def test_write_generates_per_section_and_renumbers(
+    prompt_dir, sample_papers, sample_analyses, sample_outline, scripted_provider
+):
+    llm = scripted_provider([PAYLOAD_P001, PAYLOAD_P002])
+    writer = make_writer(prompt_dir, llm, max_concurrency=1)
+    result = run_writer(
+        writer, TaskInput(topic="Unit Topic"), sample_outline, sample_analyses, sample_papers
     )
-    writer = make_writer(prompt_dir, llm)
-    result = writer.write(TaskInput(topic="Unit Topic"), sample_papers)
-
-    assert len(llm.calls) == 1
-    assert llm.calls[0]["model"] == ModelConfig().name
-    assert result.output.citations[0].paper_id == "P001"
-    assert result.output.claims[0].claim_id == "C001"
-    assert "## References" in result.output.survey_markdown
-
-
-def test_write_requires_non_empty_papers(prompt_dir: Path, scripted_provider) -> None:
-    writer = make_writer(prompt_dir, scripted_provider([]))
-    with pytest.raises(WriterError, match="论文集为空"):
-        writer.write(TaskInput(topic="Unit Topic"), PaperSet())
-
-
-def test_parse_renumbers_by_first_appearance(
-    prompt_dir: Path, sample_papers: PaperSet, scripted_provider
-) -> None:
-    writer = make_writer(prompt_dir, scripted_provider([]))
-    output = writer.parse(
-        {
-            "survey_markdown": "## Introduction\nOld number three [3]; then old one [1].",
-            "claims": [
-                {"text": "first claim", "citations": ["P002"]},
-                {"text": "second claim", "citations": ["P001"]},
-            ],
-            "citations": [
-                {"citation_id": "[1]", "paper_id": "P001"},
-                {"citation_id": "[3]", "paper_id": "P002"},
-            ],
-        },
-        sample_papers,
+    markdown = result.output.survey_markdown
+    assert markdown.startswith("## Introduction\n\nVision-language models support driving [1].")
+    assert "## Taxonomy\n\nMethods fall into families [2]." in markdown
+    assert "[[P001]]" not in markdown and "[[P002]]" not in markdown
+    assert markdown.rstrip().endswith(
+        "[2] Language-Grounded Trajectory Prediction (2025). ExampleJournal 2025"
     )
-    markdown = output.survey_markdown
-    assert markdown.index("[1]") < markdown.index("[2]")
-    assert "[3]" not in markdown.split("## References")[0]
-    assert [citation.paper_id for citation in output.citations] == ["P002", "P001"]
-    assert [claim.claim_id for claim in output.claims] == ["C001", "C002"]
-    assert "[1] Language-Grounded Trajectory Prediction (2025)." in markdown
-    assert "[2] Vision-Language Models for Driving (2024)." in markdown
+    assert [c.claim_id for c in result.output.claims] == ["C001", "C002"]
+    assert [c.paper_id for c in result.output.citations] == ["P001", "P002"]
+    assert len(result.section_messages) == 2
 
 
-def test_parse_drops_hallucinated_citations(
-    prompt_dir: Path, sample_papers: PaperSet, scripted_provider
-) -> None:
+def test_write_requires_outline(prompt_dir, sample_papers, sample_analyses, scripted_provider):
     writer = make_writer(prompt_dir, scripted_provider([]))
-    output = writer.parse(
-        {
-            "survey_markdown": "## Introduction\nA claim [1].",
-            "claims": [
-                {"text": "valid claim", "citations": ["P001"]},
-                {"text": "unbound claim", "citations": ["P999"]},
-                {"text": "", "citations": ["P001"]},
-            ],
-            "citations": [
-                {"citation_id": "[1]", "paper_id": "P001"},
-                {"citation_id": "[2]", "paper_id": "P999"},
-            ],
-        },
-        sample_papers,
-    )
-    assert len(output.citations) == 1
-    assert len(output.claims) == 1
-    assert output.claims[0].text == "valid claim"
-    assert "P999" not in output.survey_markdown
+    with pytest.raises(WriterError, match="Outline 为空"):
+        run_writer(
+            writer,
+            TaskInput(topic="Unit Topic"),
+            Outline(),
+            sample_analyses,
+            sample_papers,
+        )
 
 
-def test_parse_keeps_non_citation_numbers_as_unknown(
-    prompt_dir: Path, sample_papers: PaperSet, scripted_provider
-) -> None:
+def test_write_requires_available_analyses(
+    prompt_dir, sample_papers, sample_outline, scripted_provider
+):
     writer = make_writer(prompt_dir, scripted_provider([]))
-    output = writer.parse(
-        {
-            "survey_markdown": "## Introduction\nSince [2020] the field grew [1].",
-            "claims": [],
-            "citations": [{"citation_id": "[1]", "paper_id": "P001"}],
-        },
-        sample_papers,
-    )
-    assert "[2020]" in output.survey_markdown
-    assert output.unknown_citations == ["[2020]"]
+    analyses = [PaperAnalysis.unavailable("P001", "读取失败")]
+    with pytest.raises(WriterError, match="没有可用的论文分析结果"):
+        run_writer(writer, TaskInput(topic="Unit Topic"), sample_outline, analyses, sample_papers)
 
 
-def test_parse_handles_grouped_citations(
-    prompt_dir: Path, sample_papers: PaperSet, scripted_provider
-) -> None:
-    writer = make_writer(prompt_dir, scripted_provider([]))
-    output = writer.parse(
-        {
-            "survey_markdown": "## Introduction\nTwo works [1, 2].",
-            "claims": [],
-            "citations": [
-                {"citation_id": "[1]", "paper_id": "P001"},
-                {"citation_id": "[2]", "paper_id": "P002"},
-            ],
-        },
-        sample_papers,
-    )
-    assert "[1, 2]" in output.survey_markdown
-    assert len(output.citations) == 2
-
-
-def test_parse_appends_references_when_missing(
-    prompt_dir: Path, sample_papers: PaperSet, scripted_provider
-) -> None:
-    writer = make_writer(prompt_dir, scripted_provider([]))
-    output = writer.parse(
-        {
-            "survey_markdown": "## Introduction\nNo references section [1].",
-            "claims": [],
-            "citations": [{"citation_id": "[1]", "paper_id": "P001"}],
-        },
-        sample_papers,
-    )
-    expected = "[1] Vision-Language Models for Driving (2024). ExampleConf 2024"
-    assert output.survey_markdown.rstrip().endswith(expected)
+def test_write_rejects_empty_section_content(
+    prompt_dir, sample_papers, sample_analyses, sample_outline, scripted_provider
+):
+    llm = scripted_provider([{"content": "   "}, PAYLOAD_P002])
+    writer = make_writer(prompt_dir, llm, max_concurrency=1)
+    with pytest.raises(WriterError, match="Introduction"):
+        run_writer(
+            writer, TaskInput(topic="Unit Topic"), sample_outline, sample_analyses, sample_papers
+        )

@@ -29,9 +29,20 @@ Final Survey + Claims + Citations + Evidence Map → Evaluation
 | `docs/Hy-SurveyAgent 项目设计文档.md` | 项目全局：场景定义、Phase 0–11、Evaluation 维度、验证实验、里程碑 |
 | `docs/Hy-SurveyAgent Application 开发文档.md` | Application 权威设计：Agent 职责、数据契约、目录结构、验收标准 |
 | `AGENTS.md`（本文件） | 工程与协作约定 |
+| `eval_harness/eval_protocol.md` | Evaluation Protocol v2.0：D1–D8 维度、权重、Judge 策略、Critical Failure Gate |
+| `eval_dataset/eval_data_construct.md` | 评测数据集构造设计：SurveyBench 数据梳理、Schema、Step 1–9 流水线 |
 | `.codebuddy/skills/hy-surveyagent-app/SKILL.md` | 开发 Application 时应优先加载的 skill |
+| `.codebuddy/skills/hy-surveyagent-eval-harness/SKILL.md` | 搭建 evaluator/（D1–D8 评分器、Judge、聚合与报告）时应优先加载的 skill |
+| `.codebuddy/skills/hy-surveyagent-eval-dataset/SKILL.md` | 搭建评测数据集构造脚本（HySurveyBench）时应优先加载的 skill |
 
 **Application 侧任务**（新增/修改 Agent、Adapter、Prompt、Pipeline）先加载 skill `hy-surveyagent-app`，再读对应 reference。
+
+**Evaluation 侧任务**分两类、互不越界：
+
+- 实现评分器 / Judge / 聚合 / 报告 → 加载 `hy-surveyagent-eval-harness`，依据 `eval_harness/eval_protocol.md`；
+- 构造或修订评测数据（Gold Papers / KIU / Quiz / 数据集校验） → 加载 `hy-surveyagent-eval-dataset`，依据 `eval_dataset/eval_data_construct.md`。
+
+铁律：**构造与评测分离** —— 评测运行时只读冻结的 `datasets/<version>/`，禁止在评测流程中生成或修改 Gold Set / Rubric / Quiz。
 
 ---
 
@@ -110,6 +121,7 @@ uv run python .codebuddy/skills/hy-surveyagent-app/scripts/check_repo.py .
 ```text
 Hy-SurveyAgent/
 ├── app/                      # Application 主体
+│   ├── web/                  # 本地 Web 工作台（server / service / static）
 │   ├── core/                 # state.py / types.py / pipeline.py
 │   ├── agents/               # task_analyzer / paper_reader / organizer / planner / writer / citation_verifier
 │   ├── retrieval/            # retriever.py / benchmark_loader.py
@@ -178,8 +190,9 @@ Hy-SurveyAgent/
 
 ```python
 class LLMProvider:
-    def generate(self, messages: list[dict], model: str,
-                 temperature: float, max_tokens: int) -> LLMResponse: ...
+    def generate(
+        self, messages: list[dict], model: str, temperature: float, max_tokens: int
+    ) -> LLMResponse: ...
 ```
 
 - Hy3 SDK 的 import **只允许出现在 `app/model/hy3_adapter.py`**。
@@ -274,3 +287,9 @@ MVP 不做：Long-term Memory、Multi-user、复杂 Web UI、持久化向量库�
 - 不要在未定义 Schema 的情况下直接开始写 Agent。
 - 不要为了「跑通」跳过 Citation 核验或编造引用。
 - 不要一次性生成全部 Agent，按 Step 1–6 增量推进。
+
+## 16. 本地 Web 工作台
+
+按后端全流程完成后的用户需求增加轻量 Web UI，运行 `uv run python -m app.web`。
+前端使用原生 HTML/CSS/JavaScript，FastAPI 接口复用原 Pipeline；不修改 Agent 职责。
+Web 入口与使用约定见 `docs/Web 工作台.md`，视觉规范见 `design-system/hy-surveyagent/MASTER.md`。
