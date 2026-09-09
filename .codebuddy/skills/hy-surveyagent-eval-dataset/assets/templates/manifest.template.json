@@ -1,0 +1,19 @@
+{
+  "dataset_name": "HySurveyBench",
+  "version": "1.0",
+  "source": "InternScience/SurveyBench",
+  "num_topics": 10,
+  "eval_protocol": "Hy-SurveyAgent Evaluation Protocol v2.0",
+  "topics": [
+    "3d_gaussian_splatting",
+    "3d_object_detection_in_autonomous_driving",
+    "evaluation_of_large_language_models",
+    "llm_based_multi_agent",
+    "generative_diffusion_models",
+    "graph_neural_networks",
+    "hallucination_in_large_language_models",
+    "multimodal_large_language_models",
+    "retrieval_augmented_generation",
+    "vision_transformers"
+  ]
+}

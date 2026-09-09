@@ -1,0 +1,36 @@
+# HySurveyBench 构造配置模板（复制为 scripts/build_eval_dataset/build_config.yaml）
+# 注意：本文件不得包含任何密钥；Key 只存 API_key.conf。
+
+surveybench_dir: data/SurveyBench        # InternScience/SurveyBench 原始仓库
+build_dir: build                          # 中间产物（01_ingested … 09_final）
+cache_dir: cache/paper_metadata           # metadata 抓取缓存，必须开启
+output_dir: datasets/hysurveybench_v0.1   # 产出目录，版本化
+
+version: "0.1"
+source: InternScience/SurveyBench
+
+# 规模控制
+gold_papers_per_topic: 50
+gold_papers_min: 30
+gold_papers_max: 80
+kiu_per_topic: 15
+quizzes_per_topic: 20
+difficulty_ratio: [0.25, 0.50, 0.25]     # easy / medium / hard
+
+# LLM（仅四个 step 允许使用：相关性判定 / KIU / Quiz / Quiz 验证）
+llm_model: ""                             # 留空则取 configs/config.yaml
+llm_temperature: 0
+prompt_versions:
+  relevance: relevance-v1
+  rubric: rubric-v1
+  quiz: quiz-v1
+  quiz_validate: quiz-validate-v1
+
+# 网络抓取
+metadata_sources: [arxiv, semantic_scholar]
+concurrency: 4
+timeout_seconds: 30
+max_retries: 3
+
+# generated_surveys_ref 不作为 Gold Data
+use_generated_refs: false

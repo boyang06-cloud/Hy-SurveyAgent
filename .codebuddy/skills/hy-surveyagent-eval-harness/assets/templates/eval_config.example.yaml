@@ -1,0 +1,47 @@
+# 评测运行参数模板（复制为 configs/eval.yaml 后使用；不含任何密钥）
+# 密钥只存 API_key.conf，禁止写在本文件。
+
+dataset_dir: datasets/hysurveybench_v1.0   # 冻结版本目录，评测期间只读
+runs_dir: runs
+out_dir: results/eval                      # 不入库
+
+# 维度权重（eval_protocol.md 第 2 节，改权重必须说明原因并递增版本）
+weights:
+  D1: 0.18   # Factual & Scientific Accuracy
+  D2: 0.18   # Citation Correctness & Traceability
+  D3: 0.13   # Topic & Information Coverage
+  D4: 0.15   # Cross-Paper Synthesis
+  D5: 0.08   # Outline & Structural Quality
+  D6: 0.15   # Reader-Need / Quiz Answerability
+  D7: 0.07   # Terminology & Academic Rigor
+  D8: 0.06   # Literature / Readability / Format
+
+# Critical Failure Gate 阈值
+gate:
+  fabricated_citation_rate_low: 0.10       # > 10% → final ≤ 60
+  fabricated_citation_rate_high: 0.30      # > 30% → final ≤ 40
+  citation_recall_min: 0.40                # < 40% → final ≤ 50
+  severe_contradictions_min: 3             # ≥ 3   → final ≤ 60
+
+judge:
+  model: ""                                # 留空则取 configs/config.yaml 的模型
+  temperature: 0                           # Judge 必须为 0
+  max_tokens: 2048
+  dual_judge_dimensions: [D1, D2, D4, D6]  # 双 Judge 维度
+  agree_threshold: 1                       # 分歧超阈值才引入 Judge C
+  cache_dir: results/eval/.judge_cache     # 缓存键含 prompt 版本 + 模型 + temperature
+
+evidence:
+  top_k: 5
+  max_passage_chars: 1200
+
+quiz:
+  general_weight: 0.4
+  topic_weight: 0.6
+  evidence_gating: true                    # 无证据题目直接 0 分
+
+runtime:
+  concurrency: 4                           # Judge 并发（Semaphore 限流）
+  timeout_seconds: 60
+  max_retries: 3
+  limit_topics: 0                          # 0 表示不限制

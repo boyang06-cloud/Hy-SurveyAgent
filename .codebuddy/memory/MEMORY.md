@@ -30,3 +30,26 @@
 - 工程教训：pytest 经 `| tail` 会吞退出码；git add 清单逐文件核对；CLI 测试注意 load_config 的 root。
 - 已知偏差：Task Analyzer 阶段未实现（MVP 以 TaskInput 直通，`SurveyState.task_spec` 为占位），属 V1 范围。
 - 后续方向：Evaluation 打分与 benchmark 数据底座属 evaluator 侧；Baseline 实现（SimplePromptGenerator 等）。
+
+## 项目级 Skills（2026-09-09）
+
+- `.codebuddy/skills/hy-surveyagent-app/` —— Application（Pipeline / Agent / Prompt / Adapter）。
+- `.codebuddy/skills/hy-surveyagent-eval-harness/` —— 搭建 `evaluator/`：D1–D8 评分器、七类分解式 Judge、
+  加权聚合 + Critical Failure Gate、报告；依据 `eval_harness/eval_protocol.md`。
+- `.codebuddy/skills/hy-surveyagent-eval-dataset/` —— 搭建 `scripts/build_eval_dataset/`：
+  基于 InternScience/SurveyBench 构造 HySurveyBench（ingest → 规范化 → metadata → Gold Papers →
+  fulltext → KIU → Quiz → validate）；依据 `eval_dataset/eval_data_construct.md`。
+- 铁律：**构造与评测分离**，评测运行时只读冻结的 `datasets/<version>/`。
+- 评测侧自检：`python .codebuddy/skills/hy-surveyagent-eval-harness/scripts/check_eval_repo.py .`
+  （密钥扫描复用 app skill 的占位值白名单，只扫 .py/.yaml/.yml/.toml）。
+
+## 本地 Web 工作台（2026-09-09）
+
+- 前端由 gpt6astra 编写，我做了 review + 修复 + 清理 + 拆分提交（6 个 commit，未 push）。
+- 结构：`app/web/`（server / service / schemas / __main__ / static）、`app/io/workspace.py`、
+  `tests/test_web.py`、`docs/Web 工作台.md`、`design-system/hy-surveyagent/MASTER.md`；入口 `uv run python -m app.web`。
+- 关键约定：Web 只做交互层，复用 `run_pipeline` / `Hy3Adapter` / `RunWriter`，不改 Agent 与 Prompt；
+  产物下载走 `ARTIFACTS` 白名单并拒绝符号链接；运行中轮询轻量接口 `/api/runs/{id}/status`，
+  完整 detail 只在状态变化时拉取。
+- 坑：Starlette `BaseHTTPMiddleware.call_next` 用的是原始 request 的 `wrapped_receive`（读 `request._body`），
+  构造新 `Request(scope, receive)` 传进去无效；限制请求体要用公开的 `await request.body()`。
