@@ -110,6 +110,7 @@ uv run python .codebuddy/skills/hy-surveyagent-app/scripts/check_repo.py .
 ```text
 Hy-SurveyAgent/
 ├── app/                      # Application 主体
+│   ├── web/                  # 本地 Web 工作台（server / service / static）
 │   ├── core/                 # state.py / types.py / pipeline.py
 │   ├── agents/               # task_analyzer / paper_reader / organizer / planner / writer / citation_verifier
 │   ├── retrieval/            # retriever.py / benchmark_loader.py
@@ -275,3 +276,9 @@ MVP 不做：Long-term Memory、Multi-user、复杂 Web UI、持久化向量库�
 - 不要在未定义 Schema 的情况下直接开始写 Agent。
 - 不要为了「跑通」跳过 Citation 核验或编造引用。
 - 不要一次性生成全部 Agent，按 Step 1–6 增量推进。
+
+## 16. 本地 Web 工作台
+
+按后端全流程完成后的用户需求增加轻量 Web UI，运行 `uv run python -m app.web`。
+前端使用原生 HTML/CSS/JavaScript，FastAPI 接口复用原 Pipeline；不修改 Agent 职责。
+Web 入口与使用约定见 `docs/Web 工作台.md`，视觉规范见 `design-system/hy-surveyagent/MASTER.md`。
