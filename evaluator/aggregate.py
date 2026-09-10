@@ -30,23 +30,28 @@ def _coerce_score(value: Any) -> float | None:
     return score
 
 
-def weighted_score(dimensions: dict[str, Any]) -> tuple[float, list[str]]:
+def weighted_score(
+    dimensions: dict[str, Any], weights: dict[str, float] | None = None
+) -> tuple[float, list[str]]:
     """按权重聚合；缺失维度按剩余权重归一化，返回 (分数, 缺失维度)。"""
+    effective_weights = dict(WEIGHTS if weights is None else weights)
+    if not effective_weights or any(value < 0 for value in effective_weights.values()):
+        raise ScoreError("权重必须是非空非负映射。")
     present: dict[str, float] = {}
     missing: list[str] = []
-    for key in WEIGHTS:
+    for key in effective_weights:
         score = _coerce_score(dimensions.get(key))
         if score is None:
             missing.append(key)
         else:
             present[key] = score
-    unknown = sorted(set(dimensions) - set(WEIGHTS))
+    unknown = sorted(set(dimensions) - set(effective_weights))
     if unknown:
         raise ScoreError(f"存在未知维度：{unknown}")
     if not present:
         raise ScoreError("没有任何可用维度分数，无法聚合。")
-    total_weight = sum(WEIGHTS[key] for key in present)
-    return sum(present[key] * WEIGHTS[key] for key in present) / total_weight, missing
+    total_weight = sum(effective_weights[key] for key in present)
+    return sum(present[key] * effective_weights[key] for key in present) / total_weight, missing
 
 
 def apply_gate(score: float, gate: dict[str, Any]) -> tuple[float, list[str]]:
@@ -87,7 +92,9 @@ def aggregate(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(gate, dict):
         raise ScoreError("gate 必须是对象。")
 
-    raw, missing = weighted_score(dimensions)
+    configured_weights = payload.get("weights")
+    weights = configured_weights if isinstance(configured_weights, dict) else None
+    raw, missing = weighted_score(dimensions, weights)
     final, reasons = apply_gate(raw, gate)
     return {
         "run_id": payload.get("run_id", ""),
@@ -101,5 +108,5 @@ def aggregate(payload: dict[str, Any]) -> dict[str, Any]:
         "dimensions": {
             key: _coerce_score(dimensions.get(key)) for key in WEIGHTS if key in dimensions
         },
-        "weights": dict(WEIGHTS),
+        "weights": dict(WEIGHTS if weights is None else weights),
     }

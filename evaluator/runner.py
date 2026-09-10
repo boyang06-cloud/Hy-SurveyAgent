@@ -304,11 +304,7 @@ class EvalRunner:
         alias: dict[str, str],
         corpus: LexicalRetriever,
     ) -> DimensionResult:
-        known = self.dataset.known_paper_ids() | {
-            str(paper.get("paper_id") or "")
-            for paper in payload.get("papers") or []
-            if isinstance(paper, dict)
-        }
+        known = self.dataset.known_paper_ids()
         cited_ids: list[str] = []
         for citation in payload.get("citations") or []:
             if isinstance(citation, dict):
@@ -320,6 +316,17 @@ class EvalRunner:
                 if paper_id not in cited_ids:
                     cited_ids.append(paper_id)
         fabricated = [paper_id for paper_id in cited_ids if paper_id not in known]
+        metadata_mismatches: list[dict[str, str]] = []
+        for citation in payload.get("citations") or []:
+            if not isinstance(citation, dict):
+                continue
+            paper_id = str(citation.get("paper_id") or "")
+            metadata = self.dataset.metadata(paper_id)
+            title = str(citation.get("title") or "").strip()
+            if metadata and title and _normalize_title(title) != _normalize_title(metadata.title):
+                metadata_mismatches.append({"paper_id": paper_id, "reason": "title mismatch"})
+                if paper_id not in fabricated:
+                    fabricated.append(paper_id)
 
         judge = self.judges["citation"]
         dual = self._dual("D2")
@@ -396,6 +403,7 @@ class EvalRunner:
                 "recall": metrics["recall"],
                 "fabricated_citation_rate": metrics["fabricated_citation_rate"],
                 "fabricated": fabricated,
+                "metadata_mismatches": metadata_mismatches,
                 "n_pairs": len(supports),
                 "n_citation_worthy": len(worthy),
                 "pairs": pair_results[:200],
@@ -776,7 +784,7 @@ class EvalRunner:
         }
         aggregate_scores = report.scores()
         try:
-            raw, missing = weighted_score(aggregate_scores)
+            raw, missing = weighted_score(aggregate_scores, self.config.weights)
             final, reasons = apply_gate(raw, report.gate)
         except Exception as exc:  # noqa: BLE001 - 聚合失败保留维度分数
             report.notes.append(f"聚合失败：{exc}")
